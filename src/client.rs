@@ -153,13 +153,13 @@ impl Client {
         }
 
         // Build the final body and content type
-        let (body, content_type) = builder.build();
+        let multipart_body = builder.build();
 
         // Make the API request
         let response = self
             .post(&format!("{BASE_URL}/images/edits"))
-            .header(http::header::CONTENT_TYPE, &content_type)
-            .send(&body)?; // Send raw bytes
+            .header(http::header::CONTENT_TYPE, multipart_body.content_type)
+            .send(multipart_body.body)?;
 
         // Get the response body as bytes to measure size
         let mut response_body = response.into_body();

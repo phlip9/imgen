@@ -87,28 +87,26 @@ impl MultipartBuilder {
     ///
     /// # Returns
     ///
-    /// A tuple containing:
-    /// 1. `Vec<u8>`: The raw bytes of the multipart/form-data body.
-    /// 2. `String`: The value for the `Content-Type` header, e.g.,
-    ///    `"multipart/form-data; boundary=..."`.
-    pub fn build(self) -> (Vec<u8>, String) {
-        let mut body = Vec::new();
+    /// A `MultipartBody` struct containing the raw body bytes and the
+    /// `Content-Type` header value.
+    pub fn build(self) -> MultipartBody {
+        let mut body_bytes = Vec::new();
         let boundary_marker = format!("--{}\r\n", self.boundary);
         let boundary_end = format!("--{}--\r\n", self.boundary);
 
         for part in self.parts {
-            body.extend_from_slice(boundary_marker.as_bytes());
+            body_bytes.extend_from_slice(boundary_marker.as_bytes());
 
             match part {
                 Part::Text { name, value } => {
                     // Build Content-Disposition header directly
-                    body.extend_from_slice(
+                    body_bytes.extend_from_slice(
                         b"Content-Disposition: form-data; name=\"",
                     );
-                    body.extend_from_slice(name.as_bytes());
-                    body.extend_from_slice(b"\"\r\n\r\n");
-                    body.extend_from_slice(value.as_bytes());
-                    body.extend_from_slice(b"\r\n");
+                    body_bytes.extend_from_slice(name.as_bytes());
+                    body_bytes.extend_from_slice(b"\"\r\n\r\n");
+                    body_bytes.extend_from_slice(value.as_bytes());
+                    body_bytes.extend_from_slice(b"\r\n");
                 }
                 Part::File {
                     name,
@@ -117,34 +115,46 @@ impl MultipartBuilder {
                     content,
                 } => {
                     // Build Content-Disposition header directly
-                    body.extend_from_slice(
+                    body_bytes.extend_from_slice(
                         b"Content-Disposition: form-data; name=\"",
                     );
-                    body.extend_from_slice(name.as_bytes());
-                    body.extend_from_slice(b"\"; filename=\"");
-                    body.extend_from_slice(
+                    body_bytes.extend_from_slice(name.as_bytes());
+                    body_bytes.extend_from_slice(b"\"; filename=\"");
+                    body_bytes.extend_from_slice(
                         filename.as_os_str().as_encoded_bytes(),
                     );
-                    body.extend_from_slice(b"\"\r\n");
+                    body_bytes.extend_from_slice(b"\"\r\n");
 
                     // Build Content-Type header directly
-                    body.extend_from_slice(b"Content-Type: ");
-                    body.extend_from_slice(content_type.as_bytes());
-                    body.extend_from_slice(b"\r\n\r\n");
+                    body_bytes.extend_from_slice(b"Content-Type: ");
+                    body_bytes.extend_from_slice(content_type.as_bytes());
+                    body_bytes.extend_from_slice(b"\r\n\r\n");
 
                     // Append file content
-                    body.extend_from_slice(&content);
-                    body.extend_from_slice(b"\r\n");
+                    body_bytes.extend_from_slice(&content);
+                    body_bytes.extend_from_slice(b"\r\n");
                 }
             }
         }
 
-        body.extend_from_slice(boundary_end.as_bytes());
+        body_bytes.extend_from_slice(boundary_end.as_bytes());
         let content_type_header =
             format!("multipart/form-data; boundary={}", self.boundary);
 
-        (body, content_type_header)
+        MultipartBody {
+            body: body_bytes,
+            content_type: content_type_header,
+        }
     }
+}
+
+/// Represents the built multipart body and its associated Content-Type header.
+#[derive(Debug)]
+pub struct MultipartBody {
+    /// The raw bytes of the multipart/form-data body.
+    pub body: Vec<u8>,
+    /// The value for the `Content-Type` header, e.g., `"multipart/form-data; boundary=..."`.
+    pub content_type: String,
 }
 
 /// Represents a part in a multipart/form-data request.
@@ -200,13 +210,13 @@ mod tests {
         builder.add_text("prompt", "A test prompt");
         builder.add_text("model", "gpt-image-1");
 
-        let (body, content_type) = builder.build();
+        let result = builder.build();
         let body_str =
-            String::from_utf8(body).expect("Body is not valid UTF-8");
+            String::from_utf8(result.body).expect("Body is not valid UTF-8");
 
         let expected_content_type =
             format!("multipart/form-data; boundary={}", boundary);
-        assert_eq!(content_type, expected_content_type);
+        assert_eq!(result.content_type, expected_content_type);
 
         let expected_body = format!(
             "--{boundary}\r\n\
@@ -246,13 +256,13 @@ mod tests {
         builder.add_file("image", temp_file.path()).unwrap();
         builder.add_file("mask", temp_png_file.path()).unwrap();
 
-        let (body, content_type) = builder.build();
+        let result = builder.build();
         // Use lossy conversion as body contains binary data and text parts
-        let body_str = String::from_utf8_lossy(&body);
+        let body_str = String::from_utf8_lossy(&result.body);
 
         let expected_content_type =
             format!("multipart/form-data; boundary={}", boundary);
-        assert_eq!(content_type, expected_content_type);
+        assert_eq!(result.content_type, expected_content_type);
 
         // Construct the expected body string manually
         let expected_body = format!(
@@ -307,13 +317,13 @@ mod tests {
     fn test_empty_builder() {
         let boundary = "emptyboundary789".to_string();
         let builder = MultipartBuilder::with_boundary(boundary.clone());
-        let (body, content_type) = builder.build();
+        let result = builder.build();
         let body_str =
-            String::from_utf8(body).expect("Body is not valid UTF-8");
+            String::from_utf8(result.body).expect("Body is not valid UTF-8");
 
         let expected_content_type =
             format!("multipart/form-data; boundary={}", boundary);
-        assert_eq!(content_type, expected_content_type);
+        assert_eq!(result.content_type, expected_content_type);
 
         let expected_body = format!("--{}--\r\n", boundary);
         assert_eq!(body_str, expected_body);
