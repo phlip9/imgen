@@ -20,7 +20,7 @@ fn main() {
 
     // Run the CLI application
     if let Err(err) = cli.run() {
-        error!("Error: {}", err);
+        error!("{}", err);
         std::process::exit(1);
     }
 }

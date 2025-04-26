@@ -65,3 +65,35 @@ fn test_create_request_serialization() {
     // Compare the serialized JSON with the expected JSON
     assert_eq!(json, expected_json);
 }
+
+#[test]
+fn test_decode_response() {
+    // Create a simple base64 string (this is "test" encoded in base64)
+    let b64_data = "dGVzdA==";
+    
+    // Create a response with base64 data
+    let response = Response {
+        created: 1713833628,
+        data: vec![ImageData {
+            b64_json: b64_data.to_string(),
+        }],
+        usage: Usage {
+            total_tokens: 100,
+            input_tokens: 50,
+            output_tokens: 50,
+            input_tokens_details: InputTokensDetails {
+                text_tokens: 10,
+                image_tokens: 40,
+            },
+        },
+    };
+    
+    // Convert to decoded response
+    let decoded = DecodedResponse::try_from(response).unwrap();
+    
+    // Check that the data was decoded correctly
+    assert_eq!(decoded.data.len(), 1);
+    assert_eq!(decoded.data[0].image_bytes, b"test");
+    assert_eq!(decoded.created, 1713833628);
+    assert_eq!(decoded.usage.total_tokens, 100);
+}

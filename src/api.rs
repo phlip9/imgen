@@ -1,4 +1,6 @@
+use base64::{prelude::BASE64_STANDARD, Engine};
 use serde::{Deserialize, Serialize};
+use std::io;
 
 #[cfg(test)]
 mod tests;
@@ -111,4 +113,74 @@ pub struct InputTokensDetails {
 
     /// The number of image tokens in the input prompt
     pub image_tokens: u32,
+}
+
+/// Decoded image data with raw bytes instead of base64
+#[derive(Debug)]
+pub struct DecodedImageData {
+    /// The raw image bytes decoded from base64
+    pub image_bytes: Vec<u8>,
+}
+
+/// Decoded response with raw image bytes instead of base64
+#[derive(Debug)]
+pub struct DecodedResponse {
+    /// The Unix timestamp (in seconds) of when the image was created
+    pub created: u64,
+
+    /// The list of decoded images
+    pub data: Vec<DecodedImageData>,
+
+    /// Token usage information for the image generation
+    pub usage: Usage,
+}
+
+impl TryFrom<ImageData> for DecodedImageData {
+    type Error = base64::DecodeError;
+
+    fn try_from(image_data: ImageData) -> Result<Self, Self::Error> {
+        // Decode the base64 string to bytes
+        let image_bytes = BASE64_STANDARD.decode(image_data.b64_json)?;
+        Ok(DecodedImageData { image_bytes })
+    }
+}
+
+impl TryFrom<Response> for DecodedResponse {
+    type Error = base64::DecodeError;
+
+    fn try_from(response: Response) -> Result<Self, Self::Error> {
+        // Convert each ImageData to DecodedImageData
+        let mut decoded_data = Vec::with_capacity(response.data.len());
+        for image_data in response.data {
+            decoded_data.push(DecodedImageData::try_from(image_data)?);
+        }
+
+        Ok(DecodedResponse {
+            created: response.created,
+            data: decoded_data,
+            usage: response.usage,
+        })
+    }
+}
+
+impl DecodedImageData {
+    /// Save the image to a file
+    pub fn save_to_file(&self, path: &str) -> io::Result<()> {
+        std::fs::write(path, &self.image_bytes)
+    }
+}
+
+impl DecodedResponse {
+    /// Save all images to files with the given prefix
+    pub fn save_images(&self, prefix: &str) -> io::Result<Vec<String>> {
+        let mut paths = Vec::with_capacity(self.data.len());
+
+        for (i, image) in self.data.iter().enumerate() {
+            let path = format!("{}.{}.{}.png", prefix, self.created, i + 1);
+            image.save_to_file(&path)?;
+            paths.push(path);
+        }
+
+        Ok(paths)
+    }
 }
