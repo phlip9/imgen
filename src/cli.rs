@@ -1,4 +1,7 @@
-use crate::{api::CreateRequest, client::Client};
+use crate::{
+    api::{CreateRequest, DecodedResponse},
+    client::Client,
+};
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use log::info;
@@ -116,7 +119,7 @@ impl CreateArgs {
         // Create the request
         let req = CreateRequest {
             model: "gpt-image-1".to_string(),
-            prompt: self.prompt,
+            prompt: self.prompt.clone(),
             n: if self.n == 1 { None } else { Some(self.n) },
             size: if self.size == "1024x1024" {
                 None
@@ -147,10 +150,25 @@ impl CreateArgs {
 
         info!("Image created at: {}", resp.created);
         info!("Generated {} image(s)", resp.data.len());
-
-        // TODO: Save the images to files
-
         info!("Token usage: {} total tokens", resp.usage.total_tokens);
+
+        // Decode the images from base64
+        let decoded_resp = DecodedResponse::try_from(resp)
+            .context("Failed to decode base64 image data")?;
+
+        // Create a sanitized prefix from the prompt (first few words)
+        let prefix = self
+            .prompt
+            .split_whitespace()
+            .take(5)
+            .collect::<Vec<_>>()
+            .join("_");
+
+        // Save the images to files
+        decoded_resp
+            .save_images(&prefix)
+            .context("Failed to save images to files")?;
+
         Ok(())
     }
 }
