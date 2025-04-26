@@ -25,3 +25,10 @@ ureq = { version = "*", default-features = false, features = [
 
 [dev-dependencies]
 tempfile = "*"
+
+[profile.release]
+codegen-units = 1
+debug = "none"
+lto = "thin"
+panic = "abort"
+strip = "symbols"
