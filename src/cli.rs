@@ -130,27 +130,11 @@ impl CreateArgs {
         let req = CreateRequest {
             model: "gpt-image-1".to_string(),
             prompt: self.prompt.clone(),
-            n: if self.n == 1 { None } else { Some(self.n) },
-            size: if self.size == "1024x1024" {
-                None
-            } else {
-                Some(self.size)
-            },
-            quality: if self.quality == "auto" {
-                None
-            } else {
-                Some(self.quality)
-            },
-            background: if self.background == "auto" {
-                None
-            } else {
-                Some(self.background)
-            },
-            moderation: if self.moderation == "auto" {
-                None
-            } else {
-                Some(self.moderation)
-            },
+            n: n_canonical(self.n),
+            size: size_canonical(self.size),
+            quality: quality_canonical(self.quality),
+            background: background_canonical(self.background),
+            moderation: moderation_canonical(self.moderation),
             output_compression: Some(self.output_compression),
             output_format: Some(self.output_format),
         };
@@ -195,17 +179,9 @@ impl EditArgs {
             prompt: self.prompt.clone(),
             mask: self.mask,
             model: "gpt-image-1".to_string(),
-            n: if self.n == 1 { None } else { Some(self.n) },
-            quality: if self.quality == "auto" {
-                None
-            } else {
-                Some(self.quality)
-            },
-            size: if self.size == "1024x1024" {
-                None
-            } else {
-                Some(self.size)
-            },
+            n: n_canonical(self.n),
+            size: size_canonical(self.size),
+            quality: quality_canonical(self.quality),
         };
 
         // Set up the spinner
@@ -283,4 +259,43 @@ fn spinner(progress: &MultiProgress) -> ProgressBar {
             .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
     );
     pb
+}
+
+fn n_canonical(n: u8) -> Option<u8> {
+    if n == 1 {
+        None
+    } else {
+        Some(n)
+    }
+}
+
+fn size_canonical(size: String) -> Option<String> {
+    match size.as_str() {
+        "auto" => None,
+        "square" => Some("1024x1024".to_string()),
+        "landscape" => Some("1536x1024".to_string()),
+        "portrait" => Some("1024x1536".to_string()),
+        _ => Some(size),
+    }
+}
+
+fn quality_canonical(quality: String) -> Option<String> {
+    match quality.as_str() {
+        "auto" => None,
+        _ => Some(quality),
+    }
+}
+
+fn background_canonical(background: String) -> Option<String> {
+    match background.as_str() {
+        "auto" => None,
+        _ => Some(background),
+    }
+}
+
+fn moderation_canonical(moderation: String) -> Option<String> {
+    match moderation.as_str() {
+        "auto" => None,
+        _ => Some(moderation),
+    }
 }

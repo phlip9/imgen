@@ -18,6 +18,7 @@ fn main() {
         env_logger::Env::default().default_filter_or("info"),
     )
     .build();
+
     // Wrap the logger so log messages and progress bars don't interfere with
     // each other.
     let progress = indicatif::MultiProgress::new();
