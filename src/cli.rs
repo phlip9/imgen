@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
-/// A CLI tool for generating and editing images using OpenAI's image generation models
+/// A CLI tool for generating and editing images using OpenAI's latest `gpt-image-1`
+/// image generation model.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
