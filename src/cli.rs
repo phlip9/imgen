@@ -12,7 +12,7 @@ use log::info;
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     /// OpenAI API key (can also be set via OPENAI_API_KEY environment variable)
-    #[arg(short, long, env = "OPENAI_API_KEY")]
+    #[arg(short, long, env = "OPENAI_API_KEY", hide_env = true)]
     pub api_key: Option<String>,
 
     #[command(subcommand)]
@@ -43,18 +43,18 @@ pub struct CreateArgs {
     pub size: String,
 
     /// The quality of the image that will be generated (high, medium, low)
-    #[arg(long, default_value = "low")]
+    #[arg(long, default_value = "high")]
     pub quality: String,
 
     /// Set transparency for the background (transparent, opaque, auto)
-    #[arg(long, default_value = "auto")]
+    #[arg(long, default_value = "opaque")]
     pub background: String,
 
     /// Control the content-moderation level (low, auto)
     #[arg(long, default_value = "low")]
     pub moderation: String,
 
-    /// The compression level for generated images (0-100)
+    /// The compression level for generated images (jpeg and webp only) (0-100)
     #[arg(long, default_value = "100")]
     pub output_compression: u8,
 
