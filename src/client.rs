@@ -1,10 +1,12 @@
-use ureq::http::{self, HeaderValue};
-
-use crate::api::{CreateRequest, Response};
+use crate::api::{CreateRequest, EditRequest, Response};
+use crate::multipart::MultipartBuilder; // Add this line
 use log::info;
 use std::error::Error;
 use std::fmt;
+use std::io; // Add this line
 use std::time::Instant;
+use ureq::http::{self, HeaderValue};
+use ureq::typestate::WithBody;
 
 static BASE_URL: &str = "https://api.openai.com/v1";
 
@@ -15,6 +17,8 @@ pub enum ClientError {
     HttpError(ureq::Error),
     /// Error parsing the response
     ParseError(serde_json::Error),
+    /// Error during file I/O for multipart request
+    IoError(io::Error), // Add this variant
     /// Other errors
     Other(String),
 }
@@ -24,6 +28,7 @@ impl fmt::Display for ClientError {
         match self {
             ClientError::HttpError(e) => write!(f, "HTTP error: {}", e),
             ClientError::ParseError(e) => write!(f, "Parse error: {}", e),
+            ClientError::IoError(e) => write!(f, "File I/O error: {}", e), // Add this line
             ClientError::Other(s) => write!(f, "Error: {}", s),
         }
     }
@@ -40,6 +45,13 @@ impl From<ureq::Error> for ClientError {
 impl From<serde_json::Error> for ClientError {
     fn from(err: serde_json::Error) -> Self {
         ClientError::ParseError(err)
+    }
+}
+
+// Add From<io::Error> implementation
+impl From<io::Error> for ClientError {
+    fn from(err: io::Error) -> Self {
+        ClientError::IoError(err)
     }
 }
 
@@ -61,8 +73,14 @@ impl Client {
         Self { agent, auth }
     }
 
+    fn post(&self, uri: &str) -> ureq::RequestBuilder<WithBody> {
+        self.agent
+            .post(uri)
+            .header(http::header::AUTHORIZATION, self.auth.clone())
+    }
+
     /// Create an image using the OpenAI API
-    pub fn create_image(
+    pub fn create_images(
         &self,
         request: CreateRequest,
     ) -> Result<Response, ClientError> {
@@ -71,9 +89,7 @@ impl Client {
 
         // Make the API request
         let response = self
-            .agent
             .post(&format!("{BASE_URL}/images/generations"))
-            .header(http::header::AUTHORIZATION, self.auth.clone())
             .send_json(&request)?;
 
         // Get the response body as bytes to measure size
@@ -93,6 +109,77 @@ impl Client {
             .with_config()
             .limit(100 << 20) // 100 MiB
             .read_json()?;
+        Ok(resp)
+    }
+
+    pub fn edit_images(
+        &self,
+        request: EditRequest,
+    ) -> Result<Response, ClientError> {
+        // Start timing the request
+        let start_time = Instant::now();
+
+        // Build the multipart request body
+        let mut builder = MultipartBuilder::new();
+
+        // Add text fields
+        builder.add_text("prompt", &request.prompt);
+        builder.add_text("model", &request.model); // Assuming model is always provided
+        if let Some(n) = request.n {
+            builder.add_text("n", &n.to_string());
+        }
+        if let Some(quality) = &request.quality {
+            builder.add_text("quality", quality);
+        }
+        if let Some(size) = &request.size {
+            builder.add_text("size", size);
+        }
+
+        // Add image files (note the field name "image[]" for multiple files)
+        for image_path in &request.images {
+            // Use "image[]" as the field name if multiple images are allowed by the API
+            // If only one image is allowed by the specific model/endpoint variant,
+            // just use "image". The current API doc implies multiple are possible
+            // for gpt-image-1 edits, using `-F "image[]=@file1.png" -F "image[]=@file2.png"`
+            // However, the text description says "For dall-e-2, you can only provide one image".
+            // Let's assume "image[]" is correct for gpt-image-1 based on the curl example.
+            // If the API expects just "image" even for gpt-image-1, this needs adjustment.
+            builder.add_file("image[]", image_path)?;
+        }
+
+        // Add optional mask file
+        if let Some(mask_path) = &request.mask {
+            builder.add_file("mask", mask_path)?;
+        }
+
+        // Build the final body and content type
+        let (body, content_type) = builder.build();
+
+        // Make the API request
+        let response = self
+            .post(&format!("{BASE_URL}/images/edits"))
+            .header(http::header::CONTENT_TYPE, &content_type)
+            .send(&body)?; // Send raw bytes
+
+        // Get the response body as bytes to measure size
+        let mut response_body = response.into_body();
+        let response_size = response_body.content_length().unwrap_or(0);
+
+        // Calculate the duration
+        let duration = start_time.elapsed();
+
+        // Log the request duration and response size
+        info!(
+            "edit_images: request completed in {duration:?} with response size \
+             of {response_size} bytes",
+        );
+
+        // Parse the JSON response
+        let resp = response_body
+            .with_config()
+            .limit(100 << 20) // 100 MiB limit
+            .read_json()?;
+
         Ok(resp)
     }
 }

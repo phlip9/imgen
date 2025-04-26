@@ -3,6 +3,7 @@
 mod api;
 mod cli;
 mod client;
+mod multipart;
 
 use clap::Parser;
 use cli::Cli;

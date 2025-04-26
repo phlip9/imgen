@@ -12,6 +12,10 @@ clap = { version = "*", features = ["derive", "env"] }
 dotenvy = "*"
 env_logger = "*"
 log = "*"
+rand = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 ureq = { version = "*", features = ["json"] }
+
+[dev-dependencies]
+tempfile = "*"

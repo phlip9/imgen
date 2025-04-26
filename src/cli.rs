@@ -146,7 +146,7 @@ impl CreateArgs {
         };
 
         // Make the API request
-        let resp = client.create_image(req)?;
+        let resp = client.create_images(req)?;
 
         info!("Image created at: {}", resp.created);
         info!("Generated {} image(s)", resp.data.len());
