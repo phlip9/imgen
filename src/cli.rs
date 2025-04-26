@@ -1,5 +1,5 @@
 use crate::{
-    api::{CreateRequest, DecodedResponse, EditRequest},
+    api::{CreateRequest, DecodedResponse, EditRequest, Response},
     client::Client,
 };
 use anyhow::Context;
@@ -148,37 +148,8 @@ impl CreateArgs {
         // Make the API request
         let resp = client.create_images(req)?;
 
-        info!("Image created at: {}", resp.created);
-        info!("Generated {} image(s)", resp.data.len());
-
-        // Calculate and display cost information
-        let cost = resp.usage.calculate_cost();
-        info!(
-            "Token usage: {} total tokens ({} input, {} output)",
-            resp.usage.total_tokens,
-            resp.usage.input_tokens,
-            resp.usage.output_tokens
-        );
-        info!("Estimated cost: ${:.2}", cost);
-
-        // Decode the images from base64
-        let decoded_resp = DecodedResponse::try_from(resp)
-            .context("Failed to decode base64 image data")?;
-
-        // Create a sanitized prefix from the prompt (first few words)
-        let prefix = self
-            .prompt
-            .split_whitespace()
-            .take(5)
-            .collect::<Vec<_>>()
-            .join("_");
-
-        // Save the images to files
-        decoded_resp
-            .save_images(&prefix)
-            .context("Failed to save images to files")?;
-
-        Ok(())
+        // Handle the response (logging, decoding, saving)
+        handle_response(resp, &self.prompt, "create")
     }
 }
 
@@ -211,43 +182,50 @@ impl EditArgs {
         };
 
         // Make the API request
-        let resp = client
-            .edit_images(req)
-            .context("Failed to edit images via API")?;
+        let resp = client.edit_images(req)?;
 
-        info!("Image edit completed at: {}", resp.created);
-        info!("Generated {} edited image(s)", resp.data.len());
-
-        // Calculate and display cost information
-        let cost = resp.usage.calculate_cost();
-        info!(
-            "Token usage: {} total tokens ({} input, {} output)",
-            resp.usage.total_tokens,
-            resp.usage.input_tokens,
-            resp.usage.output_tokens
-        );
-        info!("Estimated cost: ${:.2}", cost);
-
-        // Decode the images from base64
-        let decoded_resp = DecodedResponse::try_from(resp)
-            .context("Failed to decode base64 image data")?;
-
-        // Create a sanitized prefix from the prompt (first few words)
-        let prefix = self
-            .prompt
-            .split_whitespace()
-            .take(5)
-            .collect::<Vec<_>>()
-            .join("_");
-        let edit_prefix = format!("edit_{}", prefix); // Add "edit_" prefix
-
-        // Save the images to files
-        let saved_files = decoded_resp
-            .save_images(&edit_prefix)
-            .context("Failed to save edited images to files")?;
-
-        info!("Saved edited images to: {:?}", saved_files);
-
-        Ok(())
+        // Handle the response (logging, decoding, saving)
+        handle_response(resp, &self.prompt, "edit")
     }
+}
+
+/// Handles the common logic after receiving an API response.
+fn handle_response(
+    resp: Response,
+    prompt: &str,
+    operation_prefix: &str,
+) -> anyhow::Result<()> {
+    info!("Operation completed at: {}", resp.created);
+    info!("Generated {} image(s)", resp.data.len());
+
+    // Calculate and display cost information
+    let cost = resp.usage.calculate_cost();
+    info!(
+        "Token usage: {} total tokens ({} input, {} output)",
+        resp.usage.total_tokens,
+        resp.usage.input_tokens,
+        resp.usage.output_tokens
+    );
+    info!("Estimated cost: ${:.2}", cost);
+
+    // Decode the images from base64
+    let decoded_resp = DecodedResponse::try_from(resp)
+        .context("Failed to decode base64 image data")?;
+
+    // Create a sanitized prefix from the prompt (first few words)
+    let prompt_prefix = prompt
+        .split_whitespace()
+        .take(5)
+        .collect::<Vec<_>>()
+        .join("_");
+    let file_prefix = format!("{}_{}", operation_prefix, prompt_prefix);
+
+    // Save the images to files
+    let saved_files = decoded_resp
+        .save_images(&file_prefix)
+        .context("Failed to save images to files")?;
+
+    info!("Saved images to: {:?}", saved_files);
+
+    Ok(())
 }
