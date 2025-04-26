@@ -5,6 +5,7 @@ use crate::{
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use log::info;
+use spinners::{Spinner, Spinners};
 
 /// A CLI tool for generating and editing images using OpenAI's latest `gpt-image-1`
 /// image generation model.
@@ -145,10 +146,20 @@ impl CreateArgs {
             output_format: Some(self.output_format),
         };
 
-        // Make the API request
-        let resp = client.create_images(req)?;
+        // Show a spinner while we wait for the API response
+        let mut sp = Spinner::new(Spinners::Dots, "Generating image...".into());
+
+        // Call the image generation API
+        let result = client.create_images(req);
+
+        let msg = match result {
+            Ok(_) => "✓ Image generation complete.",
+            Err(_) => "✗ Image generation failed.",
+        };
+        sp.stop_with_message(msg.into());
 
         // Handle the response (logging, decoding, saving)
+        let resp = result?;
         handle_response(resp, &self.prompt, "create")
     }
 }
@@ -181,10 +192,20 @@ impl EditArgs {
             },
         };
 
-        // Make the API request
-        let resp = client.edit_images(req)?;
+        // Show a spinner while we wait for the API response
+        let mut sp = Spinner::new(Spinners::Dots, "Editing image...".into());
+
+        // Call the image generation API
+        let result = client.edit_images(req);
+
+        let msg = match result {
+            Ok(_) => "✓ Image editing complete.",
+            Err(_) => "✗ Image editing failed.",
+        };
+        sp.stop_with_message(msg.into());
 
         // Handle the response (logging, decoding, saving)
+        let resp = result?;
         handle_response(resp, &self.prompt, "edit")
     }
 }
