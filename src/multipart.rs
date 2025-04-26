@@ -7,16 +7,16 @@ use std::path::{Path, PathBuf};
 
 /// Builds a multipart/form-data request body.
 #[derive(Debug)]
-pub struct MultipartBuilder {
+pub struct Builder {
     boundary: String,
     parts: Vec<Part>,
 }
 
-impl MultipartBuilder {
+impl Builder {
     /// Creates a new MultipartBuilder with a random boundary.
     pub fn new() -> Self {
         let boundary = generate_boundary();
-        MultipartBuilder {
+        Builder {
             boundary,
             parts: Vec::new(),
         }
@@ -26,7 +26,7 @@ impl MultipartBuilder {
     /// Useful for testing.
     #[cfg(test)] // Only include this constructor in test builds
     fn with_boundary(boundary: String) -> Self {
-        MultipartBuilder {
+        Builder {
             boundary,
             parts: Vec::new(),
         }
@@ -89,7 +89,7 @@ impl MultipartBuilder {
     ///
     /// A `MultipartBody` struct containing the raw body bytes and the
     /// `Content-Type` header value.
-    pub fn build(self) -> MultipartBody {
+    pub fn build(self) -> Body {
         let mut body_bytes = Vec::new();
         let boundary_marker = format!("--{}\r\n", self.boundary);
         let boundary_end = format!("--{}--\r\n", self.boundary);
@@ -141,7 +141,7 @@ impl MultipartBuilder {
         let content_type_header =
             format!("multipart/form-data; boundary={}", self.boundary);
 
-        MultipartBody {
+        Body {
             body: body_bytes,
             content_type: content_type_header,
         }
@@ -150,7 +150,7 @@ impl MultipartBuilder {
 
 /// Represents the built multipart body and its associated Content-Type header.
 #[derive(Debug)]
-pub struct MultipartBody {
+pub struct Body {
     /// The raw bytes of the multipart/form-data body.
     pub body: Vec<u8>,
     /// The value for the `Content-Type` header, e.g., `"multipart/form-data; boundary=..."`.
@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn test_build_basic_text() {
         let boundary = "testboundary123".to_string();
-        let mut builder = MultipartBuilder::with_boundary(boundary.clone());
+        let mut builder = Builder::with_boundary(boundary.clone());
         builder.add_text("prompt", "A test prompt");
         builder.add_text("model", "gpt-image-1");
 
@@ -251,7 +251,7 @@ mod tests {
             temp_png_file.path().file_name().unwrap().to_str().unwrap();
 
         let boundary = "testboundary456".to_string();
-        let mut builder = MultipartBuilder::with_boundary(boundary.clone());
+        let mut builder = Builder::with_boundary(boundary.clone());
         builder.add_text("model", "gpt-image-1");
         builder.add_file("image", temp_file.path()).unwrap();
         builder.add_file("mask", temp_png_file.path()).unwrap();
@@ -316,7 +316,7 @@ mod tests {
     #[test]
     fn test_empty_builder() {
         let boundary = "emptyboundary789".to_string();
-        let builder = MultipartBuilder::with_boundary(boundary.clone());
+        let builder = Builder::with_boundary(boundary.clone());
         let result = builder.build();
         let body_str =
             String::from_utf8(result.body).expect("Body is not valid UTF-8");

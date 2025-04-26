@@ -1,9 +1,9 @@
 use crate::api::{CreateRequest, EditRequest, Response};
-use crate::multipart::MultipartBuilder; // Add this line
+use crate::multipart;
 use log::info;
 use std::error::Error;
 use std::fmt;
-use std::io; // Add this line
+use std::io;
 use std::time::Instant;
 use ureq::http::{self, HeaderValue};
 use ureq::typestate::WithBody;
@@ -120,7 +120,7 @@ impl Client {
         let start_time = Instant::now();
 
         // Build the multipart request body
-        let mut builder = MultipartBuilder::new();
+        let mut builder = multipart::Builder::new();
 
         // Add text fields
         builder.add_text("prompt", &request.prompt);
