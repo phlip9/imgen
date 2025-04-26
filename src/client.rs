@@ -1,8 +1,10 @@
 use ureq::http::{self, HeaderValue};
 
 use crate::api::{CreateRequest, Response};
+use log::info;
 use std::error::Error;
 use std::fmt;
+use std::time::Instant;
 
 static BASE_URL: &str = "https://api.openai.com/v1";
 
@@ -64,13 +66,33 @@ impl Client {
         &self,
         request: CreateRequest,
     ) -> Result<Response, ClientError> {
-        let resp = self
+        // Start timing the request
+        let start_time = Instant::now();
+
+        // Make the API request
+        let response = self
             .agent
             .post(&format!("{BASE_URL}/images/generations"))
             .header(http::header::AUTHORIZATION, self.auth.clone())
-            .send_json(&request)?
-            .into_body()
-            .read_json::<Response>()?;
+            .send_json(&request)?;
+
+        // Get the response body as bytes to measure size
+        let mut body = response.into_body();
+        let response_size = body.content_length().unwrap_or(0);
+
+        // Calculate the duration
+        let duration = start_time.elapsed();
+
+        // Log the request duration and response size
+        info!(
+            "create_image: request completed in {duration:?} with response size \
+             of {response_size} bytes",
+        );
+
+        let resp = body
+            .with_config()
+            .limit(100 << 20) // 100 MiB
+            .read_json()?;
         Ok(resp)
     }
 }
