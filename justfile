@@ -13,3 +13,7 @@ ci:
 
 watch-ci:
     cargo watch --why --shell "just ci"
+
+# `just release patch`
+release *args:
+    cargo release --no-publish {{ args }}
