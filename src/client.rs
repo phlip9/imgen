@@ -124,7 +124,7 @@ impl Client {
 
         // Add text fields
         builder.add_text("prompt", &request.prompt);
-        builder.add_text("model", &request.model); // Assuming model is always provided
+        builder.add_text("model", &request.model);
         if let Some(n) = request.n {
             builder.add_text("n", &n.to_string());
         }
