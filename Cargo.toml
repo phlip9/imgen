@@ -9,6 +9,8 @@ edition = "2021"
 anyhow = "*"
 clap = { version = "*", features = ["derive", "env"] }
 dotenvy = "*"
+env_logger = "*"
+log = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 ureq = { version = "*", features = ["json"] }

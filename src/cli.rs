@@ -1,6 +1,7 @@
 use crate::{api::CreateRequest, client::Client};
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use log::info;
 
 /// A CLI tool for generating and editing images using OpenAI's latest `gpt-image-1`
 /// image generation model.
@@ -110,7 +111,7 @@ impl Commands {
 impl CreateArgs {
     /// Run the create image command
     fn run(self, client: &Client) -> anyhow::Result<()> {
-        eprintln!("Creating image with prompt: {}", self.prompt);
+        info!("Creating image with prompt: {}", self.prompt);
 
         // Create the request
         let req = CreateRequest {
@@ -144,12 +145,12 @@ impl CreateArgs {
         // Make the API request
         let resp = client.create_image(req)?;
 
-        eprintln!("Image created at: {}", resp.created);
-        eprintln!("Generated {} image(s)", resp.data.len());
+        info!("Image created at: {}", resp.created);
+        info!("Generated {} image(s)", resp.data.len());
 
         // TODO: Save the images to files
 
-        eprintln!("Token usage: {} total tokens", resp.usage.total_tokens);
+        info!("Token usage: {} total tokens", resp.usage.total_tokens);
         Ok(())
     }
 }
