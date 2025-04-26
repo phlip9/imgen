@@ -9,3 +9,4 @@ Minimal dependencies. Uses:
 * `clap` for command line argument parsing
 * `dotenvy` for .env convenience
 * `indicatif` for progress spinners
+* `indicatif-log-bridge` to integrate logging with spinners

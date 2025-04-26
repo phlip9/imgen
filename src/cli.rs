@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::info;
 use std::time::Duration;
 
@@ -93,29 +93,37 @@ pub struct EditArgs {
 }
 
 impl Cli {
-    pub fn run(self) -> anyhow::Result<()> {
+    pub fn run(self, progress: &MultiProgress) -> anyhow::Result<()> {
         // Get API key from CLI args or environment
         let api_key = self.api_key.context(
             "Error: API key is required. Provide it with --api-key or set the \
              `OPENAI_API_KEY` environment variable.",
         )?;
 
-        self.command.run(&Client::new(api_key))
+        self.command.run(progress, &Client::new(api_key))
     }
 }
 
 impl Commands {
-    fn run(self, client: &Client) -> anyhow::Result<()> {
+    fn run(
+        self,
+        progress: &MultiProgress,
+        client: &Client,
+    ) -> anyhow::Result<()> {
         match self {
-            Self::Create(args) => args.run(client),
-            Self::Edit(args) => args.run(client),
+            Self::Create(args) => args.run(progress, client),
+            Self::Edit(args) => args.run(progress, client),
         }
     }
 }
 
 impl CreateArgs {
     /// Run the create image command
-    fn run(self, client: &Client) -> anyhow::Result<()> {
+    fn run(
+        self,
+        progress: &MultiProgress,
+        client: &Client,
+    ) -> anyhow::Result<()> {
         info!("Creating image with prompt: {}", self.prompt);
 
         // Create the request
@@ -148,7 +156,7 @@ impl CreateArgs {
         };
 
         // Set up the spinner
-        let sp = spinner();
+        let sp = spinner(progress);
         sp.set_message("Generating image...");
 
         // Call the image generation API
@@ -160,6 +168,7 @@ impl CreateArgs {
             Err(_) => "✗ Image generation failed.",
         };
         sp.finish_with_message(msg);
+        progress.remove(&sp);
 
         // Handle the response (logging, decoding, saving)
         let resp = result?;
@@ -169,7 +178,11 @@ impl CreateArgs {
 
 impl EditArgs {
     /// Run the edit image command
-    fn run(self, client: &Client) -> anyhow::Result<()> {
+    fn run(
+        self,
+        progress: &MultiProgress,
+        client: &Client,
+    ) -> anyhow::Result<()> {
         info!("Editing image(s) with prompt: {}", self.prompt);
         info!("Input image(s): {:?}", self.image);
         if let Some(mask) = &self.mask {
@@ -196,7 +209,7 @@ impl EditArgs {
         };
 
         // Set up the spinner
-        let sp = spinner();
+        let sp = spinner(progress);
         sp.set_message("Editing image...");
 
         // Call the image generation API
@@ -208,6 +221,7 @@ impl EditArgs {
             Err(_) => "✗ Image editing failed.",
         };
         sp.finish_with_message(msg);
+        progress.remove(&sp);
 
         // Handle the response (logging, decoding, saving)
         let resp = result?;
@@ -260,8 +274,8 @@ fn handle_response(
 /// response.
 ///
 /// For more spinners check out: <https://github.com/sindresorhus/cli-spinners/blob/main/spinners.json>
-fn spinner() -> ProgressBar {
-    let pb = ProgressBar::new_spinner();
+fn spinner(progress: &MultiProgress) -> ProgressBar {
+    let pb = progress.add(ProgressBar::new_spinner());
     pb.enable_steady_tick(Duration::from_millis(80));
     pb.set_style(
         ProgressStyle::with_template("{spinner:.blue} {msg}")

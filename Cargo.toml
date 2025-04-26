@@ -12,6 +12,7 @@ clap = { version = "*", features = ["derive", "env"] }
 dotenvy = "*"
 env_logger = "*"
 indicatif = "*"
+indicatif-log-bridge = "*"
 log = "*"
 rand = "*"
 serde = { version = "*", features = ["derive"] }
