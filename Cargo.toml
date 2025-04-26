@@ -8,16 +8,20 @@ edition = "2021"
 [dependencies]
 anyhow = "*"
 base64 = "*"
-clap = { version = "*", features = ["derive", "env"] }
+clap = { version = "*",  features = ["derive", "env"] }
 dotenvy = "*"
-env_logger = "*"
+env_logger = { version = "*", default-features = false, features = ["auto-color"] }
 indicatif = "*"
 indicatif-log-bridge = "*"
 log = "*"
 rand = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
-ureq = { version = "*", features = ["json"] }
+ureq = { version = "*", default-features = false, features = [
+    "gzip",
+    "json",
+    "native-tls",
+] }
 
 [dev-dependencies]
 tempfile = "*"
