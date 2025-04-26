@@ -5,7 +5,7 @@ use crate::{
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use log::info;
+use log::{error, info};
 use std::time::Duration;
 
 /// A CLI tool for generating and editing images using OpenAI's latest `gpt-image-1`
@@ -28,6 +28,9 @@ pub enum Commands {
 
     /// Create an edited or extended image given one or more source images and a prompt using gpt-image-1
     Edit(EditArgs),
+
+    /// Test the cli
+    Test(TestArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -92,6 +95,9 @@ pub struct EditArgs {
     pub size: String,
 }
 
+#[derive(Parser, Debug)]
+pub struct TestArgs {}
+
 impl Cli {
     pub fn run(self, progress: &MultiProgress) -> anyhow::Result<()> {
         // Get API key from CLI args or environment
@@ -113,6 +119,7 @@ impl Commands {
         match self {
             Self::Create(args) => args.run(progress, client),
             Self::Edit(args) => args.run(progress, client),
+            Self::Test(args) => args.run(progress),
         }
     }
 }
@@ -146,13 +153,15 @@ impl CreateArgs {
         // Call the image generation API
         let result = client.create_images(req);
 
-        // Update spinner message based on result
-        let msg = match result {
-            Ok(_) => "✓ Image generation complete.",
-            Err(_) => "✗ Image generation failed.",
-        };
-        sp.finish_with_message(msg);
+        // Clean up the spinner
+        sp.finish();
         progress.remove(&sp);
+
+        // Update spinner message based on result
+        match result {
+            Ok(_) => info!("✓ Image generation complete."),
+            Err(_) => error!("✗ Image generation failed."),
+        };
 
         // Handle the response (logging, decoding, saving)
         let resp = result?;
@@ -191,17 +200,40 @@ impl EditArgs {
         // Call the image generation API
         let result = client.edit_images(req);
 
-        // Update spinner message based on result
-        let msg = match result {
-            Ok(_) => "✓ Image editing complete.",
-            Err(_) => "✗ Image editing failed.",
-        };
-        sp.finish_with_message(msg);
+        // Clean up the spinner
+        sp.finish();
         progress.remove(&sp);
+
+        // Update spinner message based on result
+        match result {
+            Ok(_) => info!("✓ Image editing complete."),
+            Err(_) => error!("✗ Image editing failed."),
+        };
 
         // Handle the response (logging, decoding, saving)
         let resp = result?;
         handle_response(resp, &self.prompt, "edit")
+    }
+}
+
+impl TestArgs {
+    /// Run the test command
+    fn run(self, progress: &MultiProgress) -> anyhow::Result<()> {
+        // Placeholder for test functionality
+        info!("This is a log.");
+
+        let sp = spinner(progress);
+        sp.set_message("Running test...");
+
+        // Simulate some work
+        std::thread::sleep(Duration::from_secs(2));
+
+        sp.finish();
+        progress.remove(&sp);
+
+        info!("Test completed successfully.");
+
+        Ok(())
     }
 }
 
