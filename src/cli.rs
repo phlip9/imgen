@@ -1,3 +1,5 @@
+use crate::{api::CreateRequest, client::Client};
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 /// A CLI tool for generating and editing images using OpenAI's latest `gpt-image-1`
@@ -82,4 +84,79 @@ pub struct EditArgs {
     /// The size of the generated images (1024x1024, 1536x1024, 1024x1536, auto)
     #[arg(long, default_value = "1024x1024")]
     pub size: String,
+}
+
+impl Cli {
+    pub fn run(self) -> anyhow::Result<()> {
+        // Get API key from CLI args or environment
+        let api_key = self.api_key.context(
+            "Error: API key is required. Provide it with --api-key or set the \
+             `OPENAI_API_KEY` environment variable.",
+        )?;
+
+        self.command.run(&Client::new(api_key))
+    }
+}
+
+impl Commands {
+    fn run(self, client: &Client) -> anyhow::Result<()> {
+        match self {
+            Self::Create(args) => args.run(client),
+            Self::Edit(args) => args.run(client),
+        }
+    }
+}
+
+impl CreateArgs {
+    /// Run the create image command
+    fn run(self, client: &Client) -> anyhow::Result<()> {
+        eprintln!("Creating image with prompt: {}", self.prompt);
+
+        // Create the request
+        let req = CreateRequest {
+            model: "gpt-image-1".to_string(),
+            prompt: self.prompt,
+            n: if self.n == 1 { None } else { Some(self.n) },
+            size: if self.size == "1024x1024" {
+                None
+            } else {
+                Some(self.size)
+            },
+            quality: if self.quality == "auto" {
+                None
+            } else {
+                Some(self.quality)
+            },
+            background: if self.background == "auto" {
+                None
+            } else {
+                Some(self.background)
+            },
+            moderation: if self.moderation == "auto" {
+                None
+            } else {
+                Some(self.moderation)
+            },
+            output_compression: Some(self.output_compression),
+            output_format: Some(self.output_format),
+        };
+
+        // Make the API request
+        let resp = client.create_image(req)?;
+
+        eprintln!("Image created at: {}", resp.created);
+        eprintln!("Generated {} image(s)", resp.data.len());
+
+        // TODO: Save the images to files
+
+        eprintln!("Token usage: {} total tokens", resp.usage.total_tokens);
+        Ok(())
+    }
+}
+
+impl EditArgs {
+    /// Run the edit image command
+    fn run(self, _client: &Client) -> anyhow::Result<()> {
+        unimplemented!()
+    }
 }
