@@ -4,8 +4,9 @@ use crate::{
 };
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use indicatif::{ProgressBar, ProgressStyle};
 use log::info;
-use spinners::{Spinner, Spinners};
+use std::time::Duration;
 
 /// A CLI tool for generating and editing images using OpenAI's latest `gpt-image-1`
 /// image generation model.
@@ -146,17 +147,19 @@ impl CreateArgs {
             output_format: Some(self.output_format),
         };
 
-        // Show a spinner while we wait for the API response
-        let mut sp = Spinner::new(Spinners::Dots, "Generating image...".into());
+        // Set up the spinner
+        let sp = spinner();
+        sp.set_message("Generating image...");
 
         // Call the image generation API
         let result = client.create_images(req);
 
+        // Update spinner message based on result
         let msg = match result {
             Ok(_) => "✓ Image generation complete.",
             Err(_) => "✗ Image generation failed.",
         };
-        sp.stop_with_message(msg.into());
+        sp.finish_with_message(msg);
 
         // Handle the response (logging, decoding, saving)
         let resp = result?;
@@ -192,17 +195,19 @@ impl EditArgs {
             },
         };
 
-        // Show a spinner while we wait for the API response
-        let mut sp = Spinner::new(Spinners::Dots, "Editing image...".into());
+        // Set up the spinner
+        let sp = spinner();
+        sp.set_message("Editing image...");
 
         // Call the image generation API
         let result = client.edit_images(req);
 
+        // Update spinner message based on result
         let msg = match result {
             Ok(_) => "✓ Image editing complete.",
             Err(_) => "✗ Image editing failed.",
         };
-        sp.stop_with_message(msg.into());
+        sp.finish_with_message(msg);
 
         // Handle the response (logging, decoding, saving)
         let resp = result?;
@@ -249,4 +254,19 @@ fn handle_response(
     info!("Saved images to: {:?}", saved_files);
 
     Ok(())
+}
+
+/// Create a new "dots" spinner to indicate progress while waiting for the API
+/// response.
+///
+/// For more spinners check out: <https://github.com/sindresorhus/cli-spinners/blob/main/spinners.json>
+fn spinner() -> ProgressBar {
+    let pb = ProgressBar::new_spinner();
+    pb.enable_steady_tick(Duration::from_millis(80));
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.blue} {msg}")
+            .unwrap()
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+    );
+    pb
 }
