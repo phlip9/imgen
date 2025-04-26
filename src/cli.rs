@@ -1,5 +1,5 @@
 use crate::{
-    api::{CreateRequest, DecodedResponse},
+    api::{CreateRequest, DecodedResponse, EditRequest},
     client::Client,
 };
 use anyhow::Context;
@@ -184,7 +184,70 @@ impl CreateArgs {
 
 impl EditArgs {
     /// Run the edit image command
-    fn run(self, _client: &Client) -> anyhow::Result<()> {
-        unimplemented!()
+    fn run(self, client: &Client) -> anyhow::Result<()> {
+        info!("Editing image(s) with prompt: {}", self.prompt);
+        info!("Input image(s): {:?}", self.image);
+        if let Some(mask) = &self.mask {
+            info!("Using mask: {}", mask);
+        }
+
+        // Create the request
+        let req = EditRequest {
+            images: self.image,
+            prompt: self.prompt.clone(),
+            mask: self.mask,
+            model: "gpt-image-1".to_string(),
+            n: if self.n == 1 { None } else { Some(self.n) },
+            quality: if self.quality == "auto" {
+                None
+            } else {
+                Some(self.quality)
+            },
+            size: if self.size == "1024x1024" {
+                None
+            } else {
+                Some(self.size)
+            },
+        };
+
+        // Make the API request
+        let resp = client
+            .edit_images(req)
+            .context("Failed to edit images via API")?;
+
+        info!("Image edit completed at: {}", resp.created);
+        info!("Generated {} edited image(s)", resp.data.len());
+
+        // Calculate and display cost information
+        let cost = resp.usage.calculate_cost();
+        info!(
+            "Token usage: {} total tokens ({} input, {} output)",
+            resp.usage.total_tokens,
+            resp.usage.input_tokens,
+            resp.usage.output_tokens
+        );
+        info!("Estimated cost: ${:.2}", cost);
+
+        // Decode the images from base64
+        let decoded_resp = DecodedResponse::try_from(resp)
+            .context("Failed to decode base64 image data")?;
+
+        // Create a sanitized prefix from the prompt (first few words)
+        let prefix = self
+            .prompt
+            .split_whitespace()
+            .take(5)
+            .collect::<Vec<_>>()
+            .join("_");
+        let edit_prefix = format!("edit_{}", prefix); // Add "edit_" prefix
+
+        // Save the images to files
+        let saved_files = decoded_resp
+            .save_images(&edit_prefix)
+            .context("Failed to save edited images to files")?;
+
+        info!("Saved edited images to: {:?}", saved_files);
+
+        Ok(())
     }
 }
