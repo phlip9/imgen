@@ -1,5 +1,4 @@
 use crate::api::{CreateRequest, EditRequest, Response};
-use crate::multipart;
 use log::info;
 use std::error::Error;
 use std::fmt;
@@ -120,40 +119,7 @@ impl Client {
         let start_time = Instant::now();
 
         // Build the multipart request body
-        let mut builder = multipart::Builder::new();
-
-        // Add text fields
-        builder.add_text("prompt", &request.prompt);
-        builder.add_text("model", &request.model);
-        if let Some(n) = request.n {
-            builder.add_text("n", &n.to_string());
-        }
-        if let Some(quality) = &request.quality {
-            builder.add_text("quality", quality);
-        }
-        if let Some(size) = &request.size {
-            builder.add_text("size", size);
-        }
-
-        // Add image files (note the field name "image[]" for multiple files)
-        for image_path in &request.images {
-            // Use "image[]" as the field name if multiple images are allowed by the API
-            // If only one image is allowed by the specific model/endpoint variant,
-            // just use "image". The current API doc implies multiple are possible
-            // for gpt-image-1 edits, using `-F "image[]=@file1.png" -F "image[]=@file2.png"`
-            // However, the text description says "For dall-e-2, you can only provide one image".
-            // Let's assume "image[]" is correct for gpt-image-1 based on the curl example.
-            // If the API expects just "image" even for gpt-image-1, this needs adjustment.
-            builder.add_file("image[]", image_path)?;
-        }
-
-        // Add optional mask file
-        if let Some(mask_path) = &request.mask {
-            builder.add_file("mask", mask_path)?;
-        }
-
-        // Build the final body and content type
-        let multipart_body = builder.build();
+        let multipart_body = request.build_multipart()?;
 
         // Make the API request
         let response = self

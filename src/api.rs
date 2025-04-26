@@ -1,3 +1,4 @@
+use crate::multipart;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -67,6 +68,48 @@ pub struct EditRequest {
 
     /// The size of the generated images (1024x1024, 1536x1024, 1024x1536, auto)
     pub size: Option<String>,
+}
+
+impl EditRequest {
+    /// Builds the multipart/form-data body for the edit request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` if any file operations fail during building.
+    pub fn build_multipart(&self) -> io::Result<multipart::Body> {
+        let mut builder = multipart::Builder::new();
+
+        // Add text fields
+        builder.add_text("prompt", &self.prompt);
+        builder.add_text("model", &self.model);
+        if let Some(n) = self.n {
+            builder.add_text("n", &n.to_string());
+        }
+        if let Some(quality) = &self.quality {
+            builder.add_text("quality", quality);
+        }
+        if let Some(size) = &self.size {
+            builder.add_text("size", size);
+        }
+
+        // Add image files
+        // Note: The API documentation is slightly ambiguous about the field name
+        // for multiple images with gpt-image-1. The curl example uses `image[]`,
+        // but the text description mentions `image` (singular) for dall-e-2.
+        // We'll stick with `image[]` based on the curl example for gpt-image-1.
+        // If the API expects just "image", this needs adjustment.
+        for image_path in &self.images {
+            builder.add_file("image[]", image_path)?;
+        }
+
+        // Add optional mask file
+        if let Some(mask_path) = &self.mask {
+            builder.add_file("mask", mask_path)?;
+        }
+
+        // Build and return the final body
+        Ok(builder.build())
+    }
 }
 
 /// Response from the OpenAI image generation API
