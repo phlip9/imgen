@@ -1,5 +1,7 @@
 use super::*;
 use serde_json::json;
+use std::fs;
+use std::io::Write;
 
 #[test]
 fn test_parse_response() {
@@ -70,7 +72,7 @@ fn test_create_request_serialization() {
 fn test_decode_response() {
     // Create a simple base64 string (this is "test" encoded in base64)
     let b64_data = "dGVzdA==";
-    
+
     // Create a response with base64 data
     let response = Response {
         created: 1713833628,
@@ -87,13 +89,96 @@ fn test_decode_response() {
             },
         },
     };
-    
+
     // Convert to decoded response
     let decoded = DecodedResponse::try_from(response).unwrap();
-    
+
     // Check that the data was decoded correctly
     assert_eq!(decoded.data.len(), 1);
     assert_eq!(decoded.data[0].image_bytes, b"test");
     assert_eq!(decoded.created, 1713833628);
     assert_eq!(decoded.usage.total_tokens, 100);
+}
+
+#[test]
+fn test_edit_request_build_multipart() {
+    // Create temporary files for image and mask
+    let mut image_file =
+        tempfile::Builder::new().suffix(".jpg").tempfile().unwrap();
+    let image_content = "image data";
+    image_file.write_all(image_content.as_bytes()).unwrap();
+    let image_path = image_file.path().to_path_buf();
+    let image_filename = image_path.file_name().unwrap().to_str().unwrap(); // Assume UTF-8 for test
+
+    let mut mask_file =
+        tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+    let mask_content = "mask data";
+    mask_file.write_all(mask_content.as_bytes()).unwrap();
+    // Rename to have .png extension for MIME test
+    let mask_path = mask_file.path().with_extension("png");
+    fs::rename(mask_file.path(), &mask_path).unwrap();
+    let mask_filename = mask_path.file_name().unwrap().to_str().unwrap(); // Assume UTF-8 for test
+
+    // Create an EditRequest
+    let request = EditRequest {
+        images: vec![image_path.to_str().unwrap().to_string()], // Use temp file path
+        prompt: "A test edit prompt".to_string(),
+        mask: Some(mask_path.to_str().unwrap().to_string()), // Use temp mask path
+        model: "gpt-image-1".to_string(),
+        n: Some(2),
+        quality: Some("high".to_string()),
+        size: Some("1024x1024".to_string()),
+    };
+
+    // Build the multipart body
+    // We need to know the boundary to compare the body, so we use a fixed one.
+    // However, the actual `build_multipart` uses `multipart::Builder::new()` which
+    // generates a random boundary. To test this properly, we'd need to either:
+    // a) Expose `multipart::Builder::with_boundary` outside of `#[cfg(test)]`
+    // b) Parse the boundary from the returned content_type and use it in the expected body.
+    // Let's go with option (b) as it tests the production code path more closely.
+
+    let multipart_body = request.build_multipart().unwrap();
+
+    // Extract the boundary from the content type
+    let content_type = multipart_body.content_type;
+    assert!(content_type.starts_with("multipart/form-data; boundary="));
+    let boundary = content_type
+        .split('=')
+        .nth(1)
+        .expect("Boundary not found in Content-Type");
+
+    // Convert body bytes to string for comparison (lossy for file content)
+    let body_str = String::from_utf8_lossy(&multipart_body.body);
+
+    // Construct the expected body string using the extracted boundary
+    let expected_body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"prompt\"\r\n\r\n\
+         A test edit prompt\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"model\"\r\n\r\n\
+         gpt-image-1\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"n\"\r\n\r\n\
+         2\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"quality\"\r\n\r\n\
+         high\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"size\"\r\n\r\n\
+         1024x1024\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"image[]\"; filename=\"{image_filename}\"\r\n\
+         Content-Type: image/jpeg\r\n\r\n\
+         {image_content}\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"mask\"; filename=\"{mask_filename}\"\r\n\
+         Content-Type: image/png\r\n\r\n\
+         {mask_content}\r\n\
+         --{boundary}--\r\n"
+    );
+
+    // Compare the generated body with the expected body
+    assert_eq!(body_str, expected_body);
 }
