@@ -13,22 +13,19 @@ static BASE_URL: &str = "https://api.openai.com/v1";
 #[derive(Debug)]
 pub enum ClientError {
     /// Error from the HTTP client
-    HttpError(ureq::Error),
+    Http(ureq::Error),
     /// Error parsing the response
-    ParseError(serde_json::Error),
+    Parse(serde_json::Error),
     /// Error during file I/O for multipart request
-    IoError(io::Error), // Add this variant
-    /// Other errors
-    Other(String),
+    Io(io::Error), // Add this variant
 }
 
 impl fmt::Display for ClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ClientError::HttpError(e) => write!(f, "HTTP error: {}", e),
-            ClientError::ParseError(e) => write!(f, "Parse error: {}", e),
-            ClientError::IoError(e) => write!(f, "File I/O error: {}", e), // Add this line
-            ClientError::Other(s) => write!(f, "Error: {}", s),
+            ClientError::Http(e) => write!(f, "HTTP error: {}", e),
+            ClientError::Parse(e) => write!(f, "Parse error: {}", e),
+            ClientError::Io(e) => write!(f, "File I/O error: {}", e), // Add this line
         }
     }
 }
@@ -37,20 +34,20 @@ impl Error for ClientError {}
 
 impl From<ureq::Error> for ClientError {
     fn from(err: ureq::Error) -> Self {
-        ClientError::HttpError(err)
+        ClientError::Http(err)
     }
 }
 
 impl From<serde_json::Error> for ClientError {
     fn from(err: serde_json::Error) -> Self {
-        ClientError::ParseError(err)
+        ClientError::Parse(err)
     }
 }
 
 // Add From<io::Error> implementation
 impl From<io::Error> for ClientError {
     fn from(err: io::Error) -> Self {
-        ClientError::IoError(err)
+        ClientError::Io(err)
     }
 }
 

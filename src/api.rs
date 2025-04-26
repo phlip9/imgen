@@ -145,6 +145,7 @@ pub struct Usage {
     pub output_tokens: u32,
 
     /// Detailed information about input tokens
+    #[allow(dead_code)]
     pub input_tokens_details: InputTokensDetails,
 }
 
@@ -169,6 +170,7 @@ impl Usage {
 
 /// Detailed information about input tokens
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct InputTokensDetails {
     /// The number of text tokens in the input prompt
     pub text_tokens: u32,
@@ -194,6 +196,7 @@ pub struct DecodedResponse {
     pub data: Vec<DecodedImageData>,
 
     /// Token usage information for the image generation
+    #[allow(dead_code)]
     pub usage: Usage,
 }
 

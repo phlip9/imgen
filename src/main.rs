@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod api;
 mod cli;
 mod client;
@@ -11,7 +9,7 @@ use log::error;
 
 fn main() {
     // Load environment variables from .env file if present
-    dotenvy::dotenv().ok();
+    let _ = dotenvy::dotenv();
 
     // Build the logger.
     let env_logger = env_logger::Builder::from_env(
