@@ -41,9 +41,35 @@ pub struct CreateRequest {
     pub output_format: Option<String>,
 }
 
+/// Request for the OpenAI image edit API
+/// Note: This is not Serialize because it needs to be multipart-form-encoded
+#[derive(Debug)]
+pub struct EditRequest {
+    /// The image(s) to edit (paths to image files)
+    pub images: Vec<String>,
+
+    /// A text description of the desired image(s)
+    pub prompt: String,
+
+    /// An additional image whose transparent areas indicate where to edit
+    pub mask: Option<String>,
+
+    /// The model to use for image generation (always gpt-image-1 for this app)
+    pub model: String,
+
+    /// The number of images to generate (1-10)
+    pub n: Option<u8>,
+
+    /// The quality of the image that will be generated (high, medium, low)
+    pub quality: Option<String>,
+
+    /// The size of the generated images (1024x1024, 1536x1024, 1024x1536, auto)
+    pub size: Option<String>,
+}
+
 /// Response from the OpenAI image generation API
 #[derive(Debug, Deserialize)]
-pub struct CreateResponse {
+pub struct Response {
     /// The Unix timestamp (in seconds) of when the image was created
     pub created: u64,
 

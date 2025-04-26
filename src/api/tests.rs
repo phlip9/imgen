@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_parse_create_response() {
+fn test_parse_response() {
     // Example response from the OpenAI API documentation
     let json_response = r#"{
         "created": 1713833628,
@@ -22,8 +22,7 @@ fn test_parse_create_response() {
     }"#;
 
     // Parse the JSON response
-    let resp: CreateResponse =
-        serde_json::from_str(json_response).expect("Failed to parse JSON");
+    let resp: Response = serde_json::from_str(json_response).unwrap();
 
     // Verify the parsed data
     assert_eq!(resp.created, 1713833628);
