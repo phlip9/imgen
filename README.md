@@ -3,9 +3,8 @@
 `imgen` is a clean and simple Rust cli tool for generating and editing images
 using OpenAI's `gpt-image-1` image generation models.
 
-Uses:
-* `ureq` for HTTP requests
-* `serde` for JSON serialization
-* `clap` for command line argument parsing
-* `dotenvy` for .env convenience
-* `indicatif` for progress spinners
+## Installation
+
+### Pre-compiled Binaries (Recommended)
+
+You can download pre-compiled binaries for Linux, macOS, and Windows directly from the [**GitHub Releases**](https://github.com/phlip9/imgen/releases) page.

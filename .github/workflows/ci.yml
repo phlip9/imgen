@@ -1,23 +1,38 @@
-name: imgen Rust CI
+name: CI
+
+# Style:
+# - Avoid unnecessary "human readable" job names and build steps when the
+#   commands are simple.
 
 on:
   push:
-    branches: [ "master" ]
   pull_request:
+  merge_group:
 
-permissions: {}
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref_name }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: rustup update
+      - run: rustup update stable && rustup default stable
       - uses: Swatinem/rust-cache@v2
+
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
       - run: cargo test
