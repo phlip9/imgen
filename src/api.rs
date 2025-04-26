@@ -105,6 +105,25 @@ pub struct Usage {
     pub input_tokens_details: InputTokensDetails,
 }
 
+impl Usage {
+    /// Calculate the total cost in USD based on token usage.
+    ///
+    /// `gpt-image-1` costs are:
+    /// * Input tokens cost $10.00 per 1M tokens
+    /// * Output tokens cost $40.00 per 1M tokens
+    pub fn calculate_cost(&self) -> f64 {
+        const INPUT_COST_PER_MILLION: f64 = 10.0;
+        const OUTPUT_COST_PER_MILLION: f64 = 40.0;
+
+        let input_cost =
+            (self.input_tokens as f64 / 1_000_000.0) * INPUT_COST_PER_MILLION;
+        let output_cost =
+            (self.output_tokens as f64 / 1_000_000.0) * OUTPUT_COST_PER_MILLION;
+
+        input_cost + output_cost
+    }
+}
+
 /// Detailed information about input tokens
 #[derive(Debug, Deserialize)]
 pub struct InputTokensDetails {

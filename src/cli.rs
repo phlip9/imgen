@@ -150,7 +150,16 @@ impl CreateArgs {
 
         info!("Image created at: {}", resp.created);
         info!("Generated {} image(s)", resp.data.len());
-        info!("Token usage: {} total tokens", resp.usage.total_tokens);
+
+        // Calculate and display cost information
+        let cost = resp.usage.calculate_cost();
+        info!(
+            "Token usage: {} total tokens ({} input, {} output)",
+            resp.usage.total_tokens,
+            resp.usage.input_tokens,
+            resp.usage.output_tokens
+        );
+        info!("Estimated cost: ${:.2}", cost);
 
         // Decode the images from base64
         let decoded_resp = DecodedResponse::try_from(resp)
