@@ -1,4 +1,4 @@
-use crate::multipart;
+use crate::{cli::InputImageData, multipart};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -45,17 +45,16 @@ pub struct CreateRequest {
 }
 
 /// Request for the OpenAI image edit API
-/// Note: This is not Serialize because it needs to be multipart-form-encoded
-#[derive(Debug)]
+/// Note: This is not Serialize because it needs to be multipart-form-encoded.
 pub struct EditRequest {
-    /// The image(s) to edit (paths to image files)
-    pub images: Vec<String>,
+    /// The image(s) to edit, represented as processed data (path or bytes).
+    pub images: Vec<InputImageData>,
 
     /// A text description of the desired image(s)
     pub prompt: String,
 
     /// An additional image whose transparent areas indicate where to edit
-    pub mask: Option<String>,
+    pub mask: Option<InputImageData>,
 
     /// The model to use for image generation (always gpt-image-1 for this app)
     pub model: String,
@@ -76,14 +75,21 @@ impl EditRequest {
     /// # Errors
     ///
     /// Returns an `io::Error` if any file operations fail during building.
-    pub fn build_multipart(&self) -> io::Result<multipart::Body> {
-        let mut builder = multipart::Builder::new();
+    pub fn build_multipart(&self) -> multipart::Body {
+        let boundary = multipart::generate_boundary();
+        self.build_multipart_inner(boundary)
+    }
 
+    // Used for testing
+    fn build_multipart_inner(&self, boundary: String) -> multipart::Body {
+        let mut builder = multipart::Builder::with_boundary(boundary);
+
+        let n_str = self.n.map(|n| n.to_string());
         // Add text fields
         builder.add_text("prompt", &self.prompt);
         builder.add_text("model", &self.model);
-        if let Some(n) = self.n {
-            builder.add_text("n", &n.to_string());
+        if let Some(n) = n_str.as_deref() {
+            builder.add_text("n", n);
         }
         if let Some(quality) = &self.quality {
             builder.add_text("quality", quality);
@@ -93,22 +99,30 @@ impl EditRequest {
         }
 
         // Add image files
-        // Note: The API documentation is slightly ambiguous about the field name
-        // for multiple images with gpt-image-1. The curl example uses `image[]`,
-        // but the text description mentions `image` (singular) for dall-e-2.
-        // We'll stick with `image[]` based on the curl example for gpt-image-1.
-        // If the API expects just "image", this needs adjustment.
-        for image_path in &self.images {
-            builder.add_file("image[]", image_path)?;
+        for image in &self.images {
+            builder.add_file_bytes(
+                "image[]",
+                &image.filename,
+                image.content_type,
+                &image.bytes,
+            );
         }
 
         // Add optional mask file
-        if let Some(mask_path) = &self.mask {
-            builder.add_file("mask", mask_path)?;
+        if let Some(mask) = &self.mask {
+            builder.add_file_bytes(
+                "mask",
+                &mask.filename,
+                mask.content_type,
+                &mask.bytes,
+            );
         }
 
         // Build and return the final body
-        Ok(builder.build())
+        let body = builder.build();
+
+        drop(n_str);
+        body
     }
 }
 

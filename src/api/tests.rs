@@ -1,7 +1,6 @@
 use super::*;
 use serde_json::json;
-use std::fs;
-use std::io::Write;
+use std::path::PathBuf;
 
 #[test]
 fn test_parse_response() {
@@ -102,28 +101,23 @@ fn test_decode_response() {
 
 #[test]
 fn test_edit_request_build_multipart() {
-    // Create temporary files for image and mask
-    let mut image_file =
-        tempfile::Builder::new().suffix(".jpg").tempfile().unwrap();
-    let image_content = "image data";
-    image_file.write_all(image_content.as_bytes()).unwrap();
-    let image_path = image_file.path().to_path_buf();
-    let image_filename = image_path.file_name().unwrap().to_str().unwrap(); // Assume UTF-8 for test
+    let input_image = InputImageData {
+        bytes: b"dummy image".to_vec(),
+        filename: PathBuf::from("test_image.jpg"),
+        content_type: "image/jpeg",
+    };
 
-    let mut mask_file =
-        tempfile::Builder::new().suffix(".png").tempfile().unwrap();
-    let mask_content = "mask data";
-    mask_file.write_all(mask_content.as_bytes()).unwrap();
-    // Rename to have .png extension for MIME test
-    let mask_path = mask_file.path().with_extension("png");
-    fs::rename(mask_file.path(), &mask_path).unwrap();
-    let mask_filename = mask_path.file_name().unwrap().to_str().unwrap(); // Assume UTF-8 for test
+    let input_mask = InputImageData {
+        bytes: b"dummy mask".to_vec(),
+        filename: PathBuf::from("test_mask.png"),
+        content_type: "image/png",
+    };
 
     // Create an EditRequest
     let request = EditRequest {
-        images: vec![image_path.to_str().unwrap().to_string()], // Use temp file path
+        images: vec![input_image.clone()],
         prompt: "A test edit prompt".to_string(),
-        mask: Some(mask_path.to_str().unwrap().to_string()), // Use temp mask path
+        mask: Some(input_mask.clone()),
         model: "gpt-image-1".to_string(),
         n: Some(2),
         quality: Some("high".to_string()),
@@ -138,7 +132,8 @@ fn test_edit_request_build_multipart() {
     // b) Parse the boundary from the returned content_type and use it in the expected body.
     // Let's go with option (b) as it tests the production code path more closely.
 
-    let multipart_body = request.build_multipart().unwrap();
+    let boundary = "----12345";
+    let multipart_body = request.build_multipart_inner(boundary.to_owned());
 
     // Extract the boundary from the content type
     let content_type = multipart_body.content_type;
@@ -152,6 +147,10 @@ fn test_edit_request_build_multipart() {
     let body_str = String::from_utf8_lossy(&multipart_body.body);
 
     // Construct the expected body string using the extracted boundary
+    let image_filename = input_image.filename.display();
+    let image_content = String::from_utf8(input_image.bytes).unwrap();
+    let mask_filename = input_mask.filename.display();
+    let mask_content = String::from_utf8(input_mask.bytes).unwrap();
     let expected_body = format!(
         "--{boundary}\r\n\
          Content-Disposition: form-data; name=\"prompt\"\r\n\r\n\

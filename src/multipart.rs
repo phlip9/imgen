@@ -1,19 +1,18 @@
 //! Simple multipart form encoding purpose built for the OpenAI API.
 
 use rand::{distr::Alphanumeric, Rng};
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Builds a multipart/form-data request body.
 #[derive(Debug)]
-pub struct Builder {
+pub struct Builder<'a> {
     boundary: String,
-    parts: Vec<Part>,
+    parts: Vec<Part<'a>>,
 }
 
-impl Builder {
+impl<'a> Builder<'a> {
     /// Creates a new MultipartBuilder with a random boundary.
+    #[allow(dead_code)]
     pub fn new() -> Self {
         let boundary = generate_boundary();
         Builder {
@@ -24,8 +23,7 @@ impl Builder {
 
     /// Creates a new MultipartBuilder with the specified boundary.
     /// Useful for testing.
-    #[cfg(test)] // Only include this constructor in test builds
-    fn with_boundary(boundary: String) -> Self {
+    pub fn with_boundary(boundary: String) -> Self {
         Builder {
             boundary,
             parts: Vec::new(),
@@ -33,53 +31,24 @@ impl Builder {
     }
 
     /// Adds a text field to the multipart form.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the form field.
-    /// * `value` - The value of the form field.
-    pub fn add_text(&mut self, name: &str, value: &str) {
-        self.parts.push(Part::Text {
-            name: name.to_string(),
-            value: value.to_string(),
-        });
+    pub fn add_text(&mut self, name: &'a str, value: &'a str) {
+        self.parts.push(Part::Text { name, value });
     }
 
-    /// Adds a file field to the multipart form by reading from the given path.
-    ///
-    /// The file content is read into memory. The filename is extracted from the path,
-    /// and the MIME type is inferred from the filename extension.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the form field.
-    /// * `path` - The path to the file to include. Can be any type that implements `AsRef<Path>`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an `io::Error` if the file cannot be read.
-    pub fn add_file<P: AsRef<Path>>(
+    /// Adds a file field from in-memory bytes.
+    pub fn add_file_bytes(
         &mut self,
-        name: &str,
-        path: P,
-    ) -> io::Result<()> {
-        let path_ref = path.as_ref();
-        // Get OsStr filename, return error if path has no filename component
-        let filename_osstr = path_ref.file_name().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "Path has no filename")
-        })?;
-        let filename = PathBuf::from(filename_osstr); // Convert OsStr to PathBuf
-
-        let content = fs::read(path_ref)?;
-        let content_type = mime_from_filename(path_ref); // Pass the Path directly
-
-        self.parts.push(Part::File {
-            name: name.to_string(),
+        name: &'a str,
+        filename: &'a Path,
+        content_type: &'a str,
+        content: &'a [u8],
+    ) {
+        self.parts.push(Part::FileBytes {
+            name,
             filename,
             content_type,
             content,
         });
-        Ok(())
     }
 
     /// Builds the final multipart/form-data body and returns it along with the
@@ -108,7 +77,7 @@ impl Builder {
                     body_bytes.extend_from_slice(value.as_bytes());
                     body_bytes.extend_from_slice(b"\r\n");
                 }
-                Part::File {
+                Part::FileBytes {
                     name,
                     filename,
                     content_type,
@@ -131,7 +100,7 @@ impl Builder {
                     body_bytes.extend_from_slice(b"\r\n\r\n");
 
                     // Append file content
-                    body_bytes.extend_from_slice(&content);
+                    body_bytes.extend_from_slice(content);
                     body_bytes.extend_from_slice(b"\r\n");
                 }
             }
@@ -159,20 +128,20 @@ pub struct Body {
 
 /// Represents a part in a multipart/form-data request.
 #[derive(Debug)]
-enum Part {
+enum Part<'a> {
     /// A simple text field.
-    Text { name: String, value: String },
-    /// A file field, including its content read into memory.
-    File {
-        name: String,
-        filename: PathBuf,
-        content_type: &'static str,
-        content: Vec<u8>,
+    Text { name: &'a str, value: &'a str },
+    /// A file field provided as raw bytes.
+    FileBytes {
+        name: &'a str,
+        filename: &'a Path,
+        content_type: &'a str,
+        content: &'a [u8],
     },
 }
 
 /// Generates a random alphanumeric boundary string of length 30.
-fn generate_boundary() -> String {
+pub fn generate_boundary() -> String {
     rand::rng()
         .sample_iter(&Alphanumeric)
         .take(30)
@@ -184,7 +153,7 @@ fn generate_boundary() -> String {
 ///
 /// Supports common image types used by the OpenAI API. Defaults to
 /// `application/octet-stream` for unknown extensions or non-UTF8 extensions.
-fn mime_from_filename<P: AsRef<Path>>(path: P) -> &'static str {
+pub fn mime_from_filename<P: AsRef<Path>>(path: P) -> &'static str {
     match path.as_ref().extension().and_then(|s| s.to_str()) {
         Some("png") => "image/png",
         Some("jpg") | Some("jpeg") => "image/jpeg",
@@ -194,14 +163,47 @@ fn mime_from_filename<P: AsRef<Path>>(path: P) -> &'static str {
     }
 }
 
+/// Detects the MIME type of a byte slice.
+///
+/// Supports PNG, WebP, and JPEG. Defaults to `application/octet-stream` if
+/// the signature is not recognized or the slice is too short.
+pub fn mime_from_bytes(bytes: &[u8]) -> &'static str {
+    // png
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return "image/png";
+    }
+
+    // webp
+    if bytes.len() >= 12
+        && bytes.starts_with(b"RIFF")
+        && bytes[8..12] == *b"WEBP"
+    {
+        return "image/webp";
+    }
+
+    // Check for JPEG (3 bytes) - Check after others as it's shorter
+    if bytes.starts_with(b"\xff\xd8") {
+        return "image/jpeg";
+    }
+
+    // Fallback if no signature matches or too few bytes
+    "application/octet-stream"
+}
+
+pub fn ext_from_mime(mime: &str) -> Option<&'static str> {
+    match mime {
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        "image/webp" => Some("webp"),
+        _ => None,
+    }
+}
+
 // --- Tests ---
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use std::path::PathBuf; // Add PathBuf import
-    use tempfile::NamedTempFile;
 
     #[test]
     fn test_build_basic_text() {
@@ -225,58 +227,6 @@ mod tests {
              --{boundary}\r\n\
              Content-Disposition: form-data; name=\"model\"\r\n\r\n\
              gpt-image-1\r\n\
-             --{boundary}--\r\n"
-        );
-
-        assert_eq!(body_str, expected_body);
-    }
-
-    #[test]
-    fn test_build_with_file() {
-        // Create a temporary file with known content (no extension)
-        let mut temp_file = NamedTempFile::new().unwrap();
-        let file_content = "dummy file content";
-        temp_file.write_all(file_content.as_bytes()).unwrap();
-        let file_path = temp_file.path().to_path_buf();
-        // Assume valid UTF-8 for test
-        let filename = file_path.file_name().unwrap().to_str().unwrap();
-
-        // Create a temporary PNG file for MIME type testing
-        let mut temp_png_file =
-            tempfile::Builder::new().suffix(".png").tempfile().unwrap();
-        let png_content = "png data";
-        temp_png_file.write_all(png_content.as_bytes()).unwrap();
-        // Assume valid UTF-8 for test
-        let png_filename =
-            temp_png_file.path().file_name().unwrap().to_str().unwrap();
-
-        let boundary = "testboundary456".to_string();
-        let mut builder = Builder::with_boundary(boundary.clone());
-        builder.add_text("model", "gpt-image-1");
-        builder.add_file("image", temp_file.path()).unwrap();
-        builder.add_file("mask", temp_png_file.path()).unwrap();
-
-        let result = builder.build();
-        // Use lossy conversion as body contains binary data and text parts
-        let body_str = String::from_utf8_lossy(&result.body);
-
-        let expected_content_type =
-            format!("multipart/form-data; boundary={}", boundary);
-        assert_eq!(result.content_type, expected_content_type);
-
-        // Construct the expected body string manually
-        let expected_body = format!(
-            "--{boundary}\r\n\
-             Content-Disposition: form-data; name=\"model\"\r\n\r\n\
-             gpt-image-1\r\n\
-             --{boundary}\r\n\
-             Content-Disposition: form-data; name=\"image\"; filename=\"{filename}\"\r\n\
-             Content-Type: application/octet-stream\r\n\r\n\
-             {file_content}\r\n\
-             --{boundary}\r\n\
-             Content-Disposition: form-data; name=\"mask\"; filename=\"{png_filename}\"\r\n\
-             Content-Type: image/png\r\n\r\n\
-             {png_content}\r\n\
              --{boundary}--\r\n"
         );
 
@@ -309,8 +259,8 @@ mod tests {
             "application/octet-stream"
         );
         // Test with PathBuf
-        let path_buf = PathBuf::from("another.png");
-        assert_eq!(mime_from_filename(&path_buf), "image/png");
+        let path_buf = Path::new("another.png");
+        assert_eq!(mime_from_filename(path_buf), "image/png");
     }
 
     #[test]

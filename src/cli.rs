@@ -2,12 +2,18 @@ use crate::{
     api::{CreateRequest, DecodedResponse, EditRequest, Response},
     client::Client,
     config::Config,
+    multipart,
 };
 use anyhow::Context;
 use clap::Parser;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{error, info, warn};
-use std::time::Duration;
+use std::{
+    io::Read as _,
+    path::{Path, PathBuf},
+    str::FromStr,
+    time::Duration,
+};
 
 // Default values for CLI options
 const DEFAULT_BACKGROUND: &str = "opaque";
@@ -45,7 +51,7 @@ pub struct GenerateArgs {
     // --- Common Arguments ---
     /// A text description of the desired image(s)
     #[arg(required_unless_present("setup"))] // Required if not doing setup
-    pub prompt: Option<String>, // Optional now, required logic checked in run
+    pub prompt: Option<InputPrompt>,
 
     /// The number of images to generate (1-10)
     #[arg(short, default_value_t = DEFAULT_NUM_IMAGES)]
@@ -63,11 +69,11 @@ pub struct GenerateArgs {
     // --- Edit-Specific Arguments ---
     /// The image(s) to edit (path to image files). Providing this triggers the edit operation.
     #[arg(short, long)]
-    pub image: Option<Vec<String>>,
+    pub image: Option<Vec<InputImage>>,
 
-    /// A version of the first image whose transparent areas indicate where to edit (edit only)
+    /// A version of the first input image whose transparent areas indicate where to edit (edit only)
     #[arg(short, long)]
-    pub mask: Option<String>,
+    pub mask: Option<InputImage>,
 
     // --- Create-Specific Arguments ---
     /// Set transparency for the background (transparent, opaque, auto) (create only)
@@ -107,13 +113,6 @@ impl Cli {
             return Ok(());
         }
 
-        // Prompt is required for image generation
-        let prompt = self
-            .args
-            .prompt
-            .clone()
-            .context("Missing prompt argument")?;
-
         // Setup the OpenAI API client
         let client = Client::new(api_key);
 
@@ -121,7 +120,7 @@ impl Cli {
         let sp = spinner(progress);
         sp.set_message("Generating image(s)...");
 
-        let result = self.args.run(&client, prompt);
+        let result = self.args.run(&client);
 
         // Update spinner message based on result
         match result {
@@ -139,10 +138,16 @@ impl Cli {
 
 impl GenerateArgs {
     /// Run the appropriate image generation or editing command based on args
-    fn run(self, client: &Client, prompt: String) -> anyhow::Result<()> {
+    fn run(self, client: &Client) -> anyhow::Result<()> {
+        // Validate and read input prompt and images
+        let prompt_source = self.prompt.context("Missing prompt")?;
+        let inputs =
+            InputPromptAndImages::new(prompt_source, self.image, self.mask)?;
+        let prompt = inputs.prompt.read_prompt()?;
+
         // Determine if we're using the edit API or the create API based on the
         // presence of `--image` options
-        let result = if let Some(images) = self.image {
+        let result = if let Some(images) = inputs.images {
             // Warn about create-API-only arguments if they are not default
             if self.background != DEFAULT_BACKGROUND {
                 warn!("Ignoring --background option; it is only applicable when generating images without --image inputs.");
@@ -157,21 +162,31 @@ impl GenerateArgs {
                 warn!("Ignoring --output-format option; it is only applicable when generating images without --image inputs.");
             }
 
+            // Read the image data
+            let images: Vec<InputImageData> = images
+                .into_iter()
+                .map(|img| img.read_image())
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // Read the mask data if provided
+            let mask = inputs.mask.map(|img| img.read_image()).transpose()?;
+
             // Create the EditRequest
             let req = EditRequest {
                 images,
                 prompt: prompt.clone(), // Use the validated prompt
-                mask: self.mask.clone(),
+                mask,
                 model: "gpt-image-1".to_string(),
                 n: n_canonical(self.n),
                 size: size_canonical(self.size.clone()),
                 quality: quality_canonical(self.quality.clone()),
             };
 
+            // Call the edit API
             client.edit_images(req)
         } else {
             // Warn about edit-API-only arguments if they are present
-            if self.mask.is_some() {
+            if inputs.mask.is_some() {
                 warn!("Ignoring --mask option; it is only applicable when generating images using --image inputs.");
             }
             // No warning needed for --image itself, as its absence triggers this path.
@@ -189,6 +204,7 @@ impl GenerateArgs {
                 output_format: Some(self.output_format.clone()), // Always send for create
             };
 
+            // Call the create API
             client.create_images(req)
         };
 
@@ -208,7 +224,7 @@ fn handle_response(resp: Response, prompt: &str) -> anyhow::Result<()> {
         resp.usage.input_tokens,
         resp.usage.output_tokens
     );
-    info!("Estimated cost: ${:.4}", cost); // Show more precision for cost
+    info!("Estimated cost: ${:.2}", cost); // Show more precision for cost
 
     // Decode the images from base64
     let decoded_resp = DecodedResponse::try_from(resp)
@@ -260,6 +276,193 @@ fn spinner(progress: &MultiProgress) -> ProgressBar {
             .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
     );
     pb
+}
+
+// --- Prompt and Image Input Handling --- //
+
+/// Parsed prompt and image inputs from the command line. Ensures at most one
+/// input uses stdin.
+struct InputPromptAndImages {
+    prompt: InputPrompt,
+    images: Option<Vec<InputImage>>,
+    mask: Option<InputImage>,
+}
+
+/// Prompts can be a literal string, a file path, or stdin ('-').
+#[derive(Clone, Debug)]
+pub enum InputPrompt {
+    Literal(String),
+    File(PathBuf),
+    Stdin,
+}
+
+/// Image inputs can be a file path or stdin ('-').
+#[derive(Clone, Debug)]
+pub enum InputImage {
+    File(PathBuf),
+    Stdin,
+}
+
+/// The read image data, including the raw bytes and metadata.
+#[cfg_attr(test, derive(Clone))]
+pub struct InputImageData {
+    pub bytes: Vec<u8>,
+    pub filename: PathBuf,
+    pub content_type: &'static str,
+}
+
+impl InputPromptAndImages {
+    fn new(
+        prompt: InputPrompt,
+        images: Option<Vec<InputImage>>,
+        mask: Option<InputImage>,
+    ) -> anyhow::Result<Self> {
+        let prompt_stdin_count = matches!(prompt, InputPrompt::Stdin) as usize;
+        let mask_stdin_count = matches!(mask, Some(InputImage::Stdin)) as usize;
+
+        let images_stdin_count = match images {
+            Some(ref imgs) => imgs
+                .iter()
+                .map(|img| matches!(img, InputImage::Stdin) as usize)
+                .sum(),
+            None => 0,
+        };
+
+        let total_stdin_count =
+            prompt_stdin_count + mask_stdin_count + images_stdin_count;
+        if total_stdin_count > 1 {
+            return Err(anyhow::anyhow!(
+                "Only one input prompt or --image can be '-' (stdin) at a time"
+            ));
+        }
+
+        Ok(Self {
+            prompt,
+            images,
+            mask,
+        })
+    }
+}
+
+impl InputPrompt {
+    fn read_prompt(self) -> anyhow::Result<String> {
+        match self {
+            InputPrompt::Literal(prompt) => Ok(prompt),
+            InputPrompt::File(path) => std::fs::read_to_string(&path)
+                .with_context(|| {
+                    format!(
+                        "Failed to read prompt from file: {}",
+                        path.display()
+                    )
+                }),
+            InputPrompt::Stdin => {
+                let mut input = String::new();
+                std::io::stdin()
+                    .lock()
+                    .read_to_string(&mut input)
+                    .context("Failed to read prompt from stdin")?;
+                Ok(input)
+            }
+        }
+    }
+}
+
+impl FromStr for InputPrompt {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match LiteralOrFileOrStdin::from_str(s)? {
+            LiteralOrFileOrStdin::Literal(prompt) => Ok(Self::Literal(prompt)),
+            LiteralOrFileOrStdin::File(path) => Ok(Self::File(path)),
+            LiteralOrFileOrStdin::Stdin => Ok(Self::Stdin),
+        }
+    }
+}
+
+impl InputImage {
+    fn read_image(self) -> anyhow::Result<InputImageData> {
+        match self {
+            InputImage::File(path) => {
+                let bytes = std::fs::read(&path).with_context(|| {
+                    format!(
+                        "Failed to read image from file: {}",
+                        path.display()
+                    )
+                })?;
+                // TODO(phlip9): fail if the file is not an image
+                let content_type = multipart::mime_from_filename(&path);
+                Ok(InputImageData {
+                    bytes,
+                    filename: path,
+                    content_type,
+                })
+            }
+            InputImage::Stdin => {
+                let mut bytes = Vec::new();
+                std::io::stdin()
+                    .lock()
+                    .read_to_end(&mut bytes)
+                    .context("Failed to read image from stdin")?;
+                let content_type = multipart::mime_from_bytes(&bytes);
+
+                // TODO(phlip9): fail if stdin is not an image
+                let mut filename = PathBuf::from("stdin");
+                if let Some(ext) = multipart::ext_from_mime(content_type) {
+                    filename.set_extension(ext);
+                };
+
+                Ok(InputImageData {
+                    bytes,
+                    filename,
+                    content_type,
+                })
+            }
+        }
+    }
+}
+
+impl FromStr for InputImage {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match LiteralOrFileOrStdin::from_str(s)? {
+            LiteralOrFileOrStdin::Literal(_) => Err(anyhow::anyhow!(
+                "Expected a file path or '-' for stdin for --image input"
+            )),
+            LiteralOrFileOrStdin::File(path) => Ok(Self::File(path)),
+            LiteralOrFileOrStdin::Stdin => Ok(Self::Stdin),
+        }
+    }
+}
+
+enum LiteralOrFileOrStdin {
+    Literal(String),
+    File(PathBuf),
+    Stdin,
+}
+
+impl FromStr for LiteralOrFileOrStdin {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Check for stdin input
+        if s == "-" {
+            return Ok(LiteralOrFileOrStdin::Stdin);
+        }
+
+        // Check if the string starts with '@' to indicate that the user
+        // explicitly wants only a file path
+        let (require_file, path) = if let Some(s) = s.strip_prefix('@') {
+            (true, Path::new(s))
+        } else {
+            (false, Path::new(s))
+        };
+
+        if path.exists() {
+            Ok(LiteralOrFileOrStdin::File(PathBuf::from(path)))
+        } else if !require_file {
+            Ok(LiteralOrFileOrStdin::Literal(String::from(s)))
+        } else {
+            Err(anyhow::anyhow!("File not found: {}", path.display()))
+        }
+    }
 }
 
 // --- Avoid passing CLI arguments that match the API default values ---

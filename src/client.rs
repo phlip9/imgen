@@ -147,7 +147,7 @@ impl Client {
         let start_time = Instant::now();
 
         // Build the multipart request body
-        let multipart_body = request.build_multipart()?;
+        let multipart_body = request.build_multipart();
 
         // Make the API request
         let response = self
@@ -158,7 +158,7 @@ impl Client {
 
         // Log the request duration
         let duration = start_time.elapsed();
-        info!("edit_images: done in {duration:?}");
+        info!("edit_images: done in {duration:.2?}");
 
         Ok(response)
     }
