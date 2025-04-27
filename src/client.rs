@@ -11,37 +11,58 @@ use ureq::typestate::WithBody;
 /// OpenAI API endpoint
 static BASE_URL: &str = "https://api.openai.com/v1";
 
+/// Our user agent string. ex: "imgen/0.1.2"
+static USER_AGENT: &str =
+    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+
 /// End-to-end timeout for requests.
 ///
 /// Our timeout needs to long to handle OpenAI's glacial image generation time.
 const TIMEOUT: Duration = Duration::from_secs(20 * 60); // 20 min
 
-/// Our user agent string. ex: "imgen/0.1.2"
-static USER_AGENT: &str =
-    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+/// Limit responses to at most 100 MiB.
+const RESPONSE_BODY_LIMIT: u64 = 100 << 20; // 100 MiB
 
 /// Error type for OpenAI API client operations
 #[derive(Debug)]
 pub enum ClientError {
-    /// Error from the HTTP client
+    /// Error from the HTTP client (transport level, DNS, timeouts, etc.)
     Http(ureq::Error),
-    /// Error parsing the response
+    /// Error parsing the response JSON
     Parse(serde_json::Error),
     /// Error during file I/O for multipart request
-    Io(io::Error), // Add this variant
+    Io(io::Error),
+    /// Error reported by the OpenAI API (e.g., invalid request, rate limit)
+    ApiError {
+        status: http::StatusCode,
+        message: String,
+    },
 }
 
 impl fmt::Display for ClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ClientError::Http(e) => write!(f, "HTTP error: {}", e),
-            ClientError::Parse(e) => write!(f, "Parse error: {}", e),
-            ClientError::Io(e) => write!(f, "File I/O error: {}", e), // Add this line
+            ClientError::Http(err) => write!(f, "HTTP transport error: {err}"),
+            ClientError::Parse(err) => write!(f, "JSON parse error: {err}"),
+            ClientError::Io(err) => write!(f, "File I/O error: {err}"),
+            ClientError::ApiError { status, message } => {
+                write!(f, "HTTP error {status}: {message}")
+            }
         }
     }
 }
 
-impl Error for ClientError {}
+impl Error for ClientError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            ClientError::Http(e) => Some(e),
+            ClientError::Parse(e) => Some(e),
+            ClientError::Io(e) => Some(e),
+            // API errors don't wrap another error
+            ClientError::ApiError { .. } => None,
+        }
+    }
+}
 
 impl From<ureq::Error> for ClientError {
     fn from(err: ureq::Error) -> Self {
@@ -55,7 +76,7 @@ impl From<serde_json::Error> for ClientError {
     }
 }
 
-// Add From<io::Error> implementation
+// Add From<io::Error> implementation specifically for file I/O errors
 impl From<io::Error> for ClientError {
     fn from(err: io::Error) -> Self {
         ClientError::Io(err)
@@ -85,6 +106,7 @@ impl Client {
             )
             .timeout_global(Some(TIMEOUT))
             .user_agent(USER_AGENT)
+            .http_status_as_error(false) // Don't treat 4xx/5xx as `Err(_)`
             .build();
         let agent = ureq::Agent::new_with_config(config);
         Self { agent, auth }
@@ -107,26 +129,14 @@ impl Client {
         // Make the API request
         let response = self
             .post(&format!("{BASE_URL}/images/generations"))
-            .send_json(&request)?;
-
-        // Get the response body as bytes to measure size
-        let mut body = response.into_body();
-        let response_size = body.content_length().unwrap_or(0);
-
-        // Calculate the duration
-        let duration = start_time.elapsed();
-
-        // Log the request duration and response size
-        info!(
-            "create_image: request completed in {duration:?} with response size \
-             of {response_size} bytes",
-        );
-
-        let resp = body
-            .with_config()
-            .limit(100 << 20) // 100 MiB
+            .send_json(&request)?
             .read_json()?;
-        Ok(resp)
+
+        // Log the request duration
+        let duration = start_time.elapsed();
+        info!("create_image: done in {duration:?}");
+
+        Ok(response)
     }
 
     pub fn edit_images(
@@ -143,27 +153,57 @@ impl Client {
         let response = self
             .post(&format!("{BASE_URL}/images/edits"))
             .header(http::header::CONTENT_TYPE, multipart_body.content_type)
-            .send(multipart_body.body)?;
-
-        // Get the response body as bytes to measure size
-        let mut response_body = response.into_body();
-        let response_size = response_body.content_length().unwrap_or(0);
-
-        // Calculate the duration
-        let duration = start_time.elapsed();
-
-        // Log the request duration and response size
-        info!(
-            "edit_images: request completed in {duration:?} with response size \
-             of {response_size} bytes",
-        );
-
-        // Parse the JSON response
-        let resp = response_body
-            .with_config()
-            .limit(100 << 20) // 100 MiB limit
+            .send(multipart_body.body)?
             .read_json()?;
 
-        Ok(resp)
+        // Log the request duration
+        let duration = start_time.elapsed();
+        info!("edit_images: done in {duration:?}");
+
+        Ok(response)
+    }
+}
+
+trait ResponseExt {
+    /// Read the response body as a JSON object.
+    fn read_json<T: serde::de::DeserializeOwned>(
+        self,
+    ) -> Result<T, ClientError>;
+}
+
+impl ResponseExt for http::Response<ureq::Body> {
+    // In order to give the user good error messages on 4xx/5xx errors, we need
+    // to explicitly check the status code and read the body on error.
+    fn read_json<T: serde::de::DeserializeOwned>(
+        self,
+    ) -> Result<T, ClientError> {
+        let status = self.status();
+        if status.is_success() {
+            // Success case (2xx)
+            // Read the response body as JSON
+            self.into_body()
+                .with_config()
+                .limit(RESPONSE_BODY_LIMIT)
+                .read_json()
+                .map_err(ClientError::from)
+        } else {
+            // Error case
+            // Try to read the response body as a string
+            let body = self
+                .into_body()
+                .with_config()
+                .limit(RESPONSE_BODY_LIMIT)
+                .read_to_vec()?;
+            let body_str = match String::from_utf8(body) {
+                Ok(s) => s,
+                Err(err) => {
+                    String::from_utf8_lossy(err.as_bytes()).into_owned()
+                }
+            };
+            Err(ClientError::ApiError {
+                status,
+                message: body_str,
+            })
+        }
     }
 }
