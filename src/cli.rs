@@ -1,16 +1,17 @@
 use crate::{
     api::{CreateRequest, DecodedResponse, EditRequest, Response},
+    cli::spinner::Spinner,
     client::Client,
     config::Config,
 };
 use anyhow::Context;
 use clap::Parser;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::MultiProgress;
 use log::{error, info, warn};
-use std::time::Duration;
 
 pub mod input;
+mod spinner;
 
 // Default values for CLI options
 const DEFAULT_BACKGROUND: &str = "opaque";
@@ -130,20 +131,14 @@ impl Cli {
         let client = Client::new(api_key);
 
         // Set up the spinner
-        let sp = spinner(progress);
+        let sp = Spinner::new(progress);
         sp.set_message("Generating image(s)...");
 
         let result = self.args.run(&client);
-
-        // Update spinner message based on result
         match result {
             Ok(_) => info!("✓ Done"),
             Err(_) => error!("✗ Done"),
         };
-
-        // Clean up the spinner
-        sp.finish();
-        progress.remove(&sp);
 
         result
     }
@@ -274,21 +269,6 @@ fn handle_response(resp: Response, prompt: &str) -> anyhow::Result<()> {
     info!("Saved images to: {}", saved_files.join(", "));
 
     Ok(())
-}
-
-/// Create a new "dots" spinner to indicate progress while waiting for the API
-/// response.
-///
-/// For more spinners check out: <https://github.com/sindresorhus/cli-spinners/blob/main/spinners.json>
-fn spinner(progress: &MultiProgress) -> ProgressBar {
-    let pb = progress.add(ProgressBar::new_spinner());
-    pb.enable_steady_tick(Duration::from_millis(80));
-    pb.set_style(
-        ProgressStyle::with_template("{spinner:.blue} {msg}")
-            .unwrap()
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
-    );
-    pb
 }
 
 // --- Avoid passing CLI arguments that match the API default values ---
