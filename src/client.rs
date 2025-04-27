@@ -16,6 +16,10 @@ static BASE_URL: &str = "https://api.openai.com/v1";
 /// Our timeout needs to long to handle OpenAI's glacial image generation time.
 const TIMEOUT: Duration = Duration::from_secs(20 * 60); // 20 min
 
+/// Our user agent string. ex: "imgen/0.1.2"
+static USER_AGENT: &str =
+    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+
 /// Error type for OpenAI API client operations
 #[derive(Debug)]
 pub enum ClientError {
@@ -80,6 +84,7 @@ impl Client {
                     .build(),
             )
             .timeout_global(Some(TIMEOUT))
+            .user_agent(USER_AGENT)
             .build();
         let agent = ureq::Agent::new_with_config(config);
         Self { agent, auth }
