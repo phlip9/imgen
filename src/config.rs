@@ -4,10 +4,8 @@
 //! from a platform-standard location (`~/.config/imgen/config.json` on Linux/macOS,
 //! `%APPDATA%\imgen\config.json` on Windows).
 
-#![allow(dead_code)]
-
 use directories::ProjectDirs;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -99,7 +97,10 @@ impl Config {
         };
 
         match Config::load_from_path(&config_path) {
-            Ok(config) => config,
+            Ok(config) => {
+                debug!("Config loaded from: {}", config_path.display());
+                config
+            }
             Err(ConfigError::NoConfig) => Config::default(),
             Err(err) => {
                 warn!(
@@ -159,6 +160,7 @@ impl Config {
         let mut file = file_opts.open(path)?;
         file.write_all(contents.as_bytes())?;
 
+        info!("Config saved to: {}", path.display());
         Ok(())
     }
 }

@@ -1,6 +1,7 @@
 use crate::{
     api::{CreateRequest, DecodedResponse, EditRequest, Response},
     client::Client,
+    config::Config,
 };
 use anyhow::Context;
 use clap::Parser;
@@ -26,8 +27,12 @@ const DEFAULT_SIZE: &str = "1024x1024";
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     /// OpenAI API key (can also be set via `OPENAI_API_KEY` environment variable)
-    #[arg(short, long, env = "OPENAI_API_KEY", hide_env = true)]
+    #[arg(short = 'k', long, env = "OPENAI_API_KEY", hide_env = true)]
     pub openai_api_key: Option<String>,
+
+    /// Store the `--openai-api-key` in the config file and exit.
+    #[arg(long, default_value_t = false)]
+    pub setup: bool,
 
     // Embed the unified image generation arguments directly
     #[command(flatten)]
@@ -39,11 +44,11 @@ pub struct Cli {
 pub struct GenerateArgs {
     // --- Common Arguments ---
     /// A text description of the desired image(s)
-    #[arg(required = true)]
-    pub prompt: String,
+    #[arg(required_unless_present("setup"))] // Required if not doing setup
+    pub prompt: Option<String>, // Optional now, required logic checked in run
 
     /// The number of images to generate (1-10)
-    #[arg(short, long, default_value_t = DEFAULT_NUM_IMAGES)]
+    #[arg(short, default_value_t = DEFAULT_NUM_IMAGES)]
     pub n: u8,
 
     /// The size of the generated images (one of: 1024x1024, 1536x1024, 1024x1536,
@@ -60,7 +65,7 @@ pub struct GenerateArgs {
     #[arg(short, long)]
     pub image: Option<Vec<String>>,
 
-    /// An additional image whose transparent areas indicate where to edit (edit only)
+    /// A version of the first image whose transparent areas indicate where to edit (edit only)
     #[arg(short, long)]
     pub mask: Option<String>,
 
@@ -84,11 +89,30 @@ pub struct GenerateArgs {
 
 impl Cli {
     pub fn run(self, progress: &MultiProgress) -> anyhow::Result<()> {
-        // Get API key from CLI args or environment
-        let api_key = self.openai_api_key.context(
-            "Error: API key is required. Provide it with --api-key or set the \
+        // Load the configuration file
+        let config = Config::load();
+
+        // Get API key from CLI > environment variable > config file
+        let api_key = self.openai_api_key.or(config.openai_api_key).context(
+            "API key is required. Provide it with --openai-api-key or set the \
              `OPENAI_API_KEY` environment variable.",
         )?;
+
+        // If --setup is provided, store the API key in the config file
+        if self.setup {
+            let config = Config {
+                openai_api_key: Some(api_key.clone()),
+            };
+            config.save()?;
+            return Ok(());
+        }
+
+        // Prompt is required for image generation
+        let prompt = self
+            .args
+            .prompt
+            .clone()
+            .context("Missing prompt argument")?;
 
         // Setup the OpenAI API client
         let client = Client::new(api_key);
@@ -97,7 +121,7 @@ impl Cli {
         let sp = spinner(progress);
         sp.set_message("Generating image(s)...");
 
-        let result = self.args.run(&client);
+        let result = self.args.run(&client, prompt);
 
         // Update spinner message based on result
         match result {
@@ -115,7 +139,7 @@ impl Cli {
 
 impl GenerateArgs {
     /// Run the appropriate image generation or editing command based on args
-    fn run(self, client: &Client) -> anyhow::Result<()> {
+    fn run(self, client: &Client, prompt: String) -> anyhow::Result<()> {
         // Determine if we're using the edit API or the create API based on the
         // presence of `--image` options
         let result = if let Some(images) = self.image {
@@ -136,7 +160,7 @@ impl GenerateArgs {
             // Create the EditRequest
             let req = EditRequest {
                 images,
-                prompt: self.prompt.clone(),
+                prompt: prompt.clone(), // Use the validated prompt
                 mask: self.mask.clone(),
                 model: "gpt-image-1".to_string(),
                 n: n_canonical(self.n),
@@ -155,7 +179,7 @@ impl GenerateArgs {
             // Create the CreateRequest
             let req = CreateRequest {
                 model: "gpt-image-1".to_string(),
-                prompt: self.prompt.clone(),
+                prompt: prompt.clone(),
                 n: n_canonical(self.n),
                 size: size_canonical(self.size.clone()),
                 quality: quality_canonical(self.quality.clone()),
@@ -170,7 +194,7 @@ impl GenerateArgs {
 
         // Handle the response (logging, decoding, saving)
         let response = result?;
-        handle_response(response, &self.prompt)
+        handle_response(response, &prompt)
     }
 }
 
@@ -184,7 +208,7 @@ fn handle_response(resp: Response, prompt: &str) -> anyhow::Result<()> {
         resp.usage.input_tokens,
         resp.usage.output_tokens
     );
-    info!("Estimated cost: ${:.2}", cost);
+    info!("Estimated cost: ${:.4}", cost); // Show more precision for cost
 
     // Decode the images from base64
     let decoded_resp = DecodedResponse::try_from(resp)
@@ -218,7 +242,7 @@ fn handle_response(resp: Response, prompt: &str) -> anyhow::Result<()> {
         .save_images(file_prefix)
         .context("Failed to save images to files")?;
 
-    info!("Saved images to: {:?}", saved_files);
+    info!("Saved images to: {}", saved_files.join(", "));
 
     Ok(())
 }
