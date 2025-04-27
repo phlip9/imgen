@@ -1,7 +1,8 @@
 //! Simple multipart form encoding purpose built for the OpenAI API.
 
+use anyhow::anyhow;
 use rand::{distr::Alphanumeric, Rng};
-use std::path::Path;
+use std::{ffi::OsStr, path::Path};
 
 /// Builds a multipart/form-data request body.
 #[derive(Debug)]
@@ -151,15 +152,31 @@ pub fn generate_boundary() -> String {
 
 /// Infers a MIME type from a filename extension.
 ///
-/// Supports common image types used by the OpenAI API. Defaults to
-/// `application/octet-stream` for unknown extensions or non-UTF8 extensions.
-pub fn mime_from_filename<P: AsRef<Path>>(path: P) -> &'static str {
-    match path.as_ref().extension().and_then(|s| s.to_str()) {
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("webp") => "image/webp",
-        // Add other types if needed
-        _ => "application/octet-stream",
+/// Only supports common image types used by the OpenAI API.
+pub fn mime_from_filename<P: AsRef<Path>>(
+    path: P,
+) -> anyhow::Result<&'static str> {
+    let path = path.as_ref();
+    let ext = match path.extension() {
+        Some(ext) => ext,
+        None => {
+            return Err(anyhow!(
+                "Filename doesn't have an extension: {}",
+                path.display()
+            ))
+        }
+    };
+
+    if ext == OsStr::new("png") {
+        Ok("image/png")
+    } else if ext == OsStr::new("jpg") || ext == OsStr::new("jpeg") {
+        Ok("image/jpeg")
+    } else if ext == OsStr::new("webp") {
+        Ok("image/webp")
+    } else {
+        Err(anyhow!(
+            "Unsupported image file type: {}. Expected a png, jpg, or webp image.", path.display()
+        ))
     }
 }
 
@@ -190,12 +207,12 @@ pub fn mime_from_bytes(bytes: &[u8]) -> &'static str {
     "application/octet-stream"
 }
 
-pub fn ext_from_mime(mime: &str) -> Option<&'static str> {
+pub fn ext_from_mime(mime: &str) -> anyhow::Result<&'static str> {
     match mime {
-        "image/png" => Some("png"),
-        "image/jpeg" => Some("jpg"),
-        "image/webp" => Some("webp"),
-        _ => None,
+        "image/png" => Ok("png"),
+        "image/jpeg" => Ok("jpg"),
+        "image/webp" => Ok("webp"),
+        _ => Err(anyhow!("Unsupported image type: {mime}")),
     }
 }
 
@@ -235,32 +252,24 @@ mod tests {
 
     #[test]
     fn test_mime_inference() {
-        assert_eq!(mime_from_filename(Path::new("image.png")), "image/png");
-        assert_eq!(mime_from_filename(Path::new("photo.jpg")), "image/jpeg");
-        assert_eq!(mime_from_filename(Path::new("graphic.jpeg")), "image/jpeg");
         assert_eq!(
-            mime_from_filename(Path::new("animation.webp")),
-            "image/webp"
-        );
-        assert_eq!(
-            mime_from_filename(Path::new("document.pdf")),
-            "application/octet-stream"
-        );
-        assert_eq!(
-            mime_from_filename(Path::new("unknown")),
-            "application/octet-stream"
-        );
-        assert_eq!(
-            mime_from_filename(Path::new("file.with.dots.png")),
+            mime_from_filename(Path::new("image.png")).unwrap(),
             "image/png"
         );
         assert_eq!(
-            mime_from_filename(Path::new("noextension")),
-            "application/octet-stream"
+            mime_from_filename(Path::new("photo.jpg")).unwrap(),
+            "image/jpeg"
         );
-        // Test with PathBuf
-        let path_buf = Path::new("another.png");
-        assert_eq!(mime_from_filename(path_buf), "image/png");
+        assert_eq!(
+            mime_from_filename(Path::new("graphic.jpeg")).unwrap(),
+            "image/jpeg"
+        );
+        assert_eq!(
+            mime_from_filename(Path::new("animation.webp")).unwrap(),
+            "image/webp"
+        );
+        mime_from_filename(Path::new("document.pdf")).unwrap_err();
+        mime_from_filename(Path::new("unknown")).unwrap_err();
     }
 
     #[test]

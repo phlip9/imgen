@@ -388,8 +388,7 @@ impl InputImage {
                         path.display()
                     )
                 })?;
-                // TODO(phlip9): fail if the file is not an image
-                let content_type = multipart::mime_from_filename(&path);
+                let content_type = multipart::mime_from_filename(&path)?;
                 Ok(InputImageData {
                     bytes,
                     filename: path,
@@ -402,13 +401,13 @@ impl InputImage {
                     .lock()
                     .read_to_end(&mut bytes)
                     .context("Failed to read image from stdin")?;
+
+                // Infer the content type from the bytes we read off stdin.
                 let content_type = multipart::mime_from_bytes(&bytes);
 
-                // TODO(phlip9): fail if stdin is not an image
+                // Use fake filename for stdin: "stdin.{png,jpg,webp}"
                 let mut filename = PathBuf::from("stdin");
-                if let Some(ext) = multipart::ext_from_mime(content_type) {
-                    filename.set_extension(ext);
-                };
+                filename.set_extension(multipart::ext_from_mime(content_type)?);
 
                 Ok(InputImageData {
                     bytes,
