@@ -11,6 +11,7 @@ use indicatif::MultiProgress;
 use log::{error, info, warn};
 
 pub mod input;
+mod sanitize;
 mod spinner;
 
 // Default values for CLI options
@@ -153,6 +154,9 @@ impl GenerateArgs {
             input::PromptAndImages::new(prompt_source, self.image, self.mask)?;
         let prompt = inputs.prompt.read_prompt()?;
 
+        // Use a sanitized prompt as the file prefix
+        let out_prefix = sanitize::prompt_prefix(&prompt);
+
         // Determine if we're using the edit API or the create API based on the
         // presence of `--image` options
         let result = if let Some(images) = inputs.images {
@@ -182,7 +186,7 @@ impl GenerateArgs {
             // Create the EditRequest
             let req = EditRequest {
                 images,
-                prompt: prompt.clone(), // Use the validated prompt
+                prompt,
                 mask,
                 model: "gpt-image-1".to_string(),
                 n: n_canonical(self.n),
@@ -202,7 +206,7 @@ impl GenerateArgs {
             // Create the CreateRequest
             let req = CreateRequest {
                 model: "gpt-image-1".to_string(),
-                prompt: prompt.clone(),
+                prompt,
                 n: n_canonical(self.n),
                 size: size_canonical(self.size.clone()),
                 quality: quality_canonical(self.quality.clone()),
@@ -218,12 +222,12 @@ impl GenerateArgs {
 
         // Handle the response (logging, decoding, saving)
         let response = result?;
-        handle_response(response, &prompt)
+        handle_response(response, &out_prefix)
     }
 }
 
 /// Handles the common logic after receiving an API response.
-fn handle_response(resp: Response, prompt: &str) -> anyhow::Result<()> {
+fn handle_response(resp: Response, out_prefix: &str) -> anyhow::Result<()> {
     // Calculate and display cost information
     let cost = resp.usage.calculate_cost();
     info!(
@@ -238,32 +242,9 @@ fn handle_response(resp: Response, prompt: &str) -> anyhow::Result<()> {
     let decoded_resp = DecodedResponse::try_from(resp)
         .context("Failed to decode base64 image data")?;
 
-    // Create a sanitized prefix from the prompt (first few words)
-    let prompt_prefix = prompt
-        .split_whitespace()
-        .map(|s| {
-            s.chars()
-                .filter(|c| c.is_alphanumeric())
-                .map(|c| c.to_ascii_lowercase())
-                .collect::<String>()
-        }) // Sanitize
-        .filter(|s| !s.is_empty()) // Remove empty strings resulting from non-alphanumeric words
-        .take(5) // Take first 5 words
-        .collect::<Vec<_>>()
-        .join("_");
-
-    // Handle cases where the prompt might be empty or only contain non-alphanumeric chars
-    let safe_prompt_prefix = if prompt_prefix.is_empty() {
-        "imgen" // Default if prompt yields no usable prefix
-    } else {
-        &prompt_prefix
-    };
-
-    let file_prefix = safe_prompt_prefix;
-
     // Save the images to files
     let saved_files = decoded_resp
-        .save_images(file_prefix)
+        .save_images(out_prefix)
         .context("Failed to save images to files")?;
 
     info!("Saved images to: {}", saved_files.join(", "));
