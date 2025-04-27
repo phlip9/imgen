@@ -24,7 +24,7 @@ const DEFAULT_OUTPUT_FORMAT: &str = "png";
 const DEFAULT_QUALITY: &str = "auto";
 const DEFAULT_SIZE: &str = "1024x1024";
 
-/// A CLI tool for generating and editing images using OpenAI's latest `gpt-image-1`
+/// A CLI tool for generating and editing images using OpenAI's `gpt-image-1`
 /// image generation model.
 ///
 /// If --image inputs are provided, the tool will use the image editing API.
@@ -49,7 +49,11 @@ pub struct Cli {
 #[derive(Parser, Debug)]
 pub struct GenerateArgs {
     // --- Common Arguments ---
-    /// A text description of the desired image(s)
+    /// A text description of the desired image(s).
+    ///
+    /// Can be a literal string, a path to a text file (if the path exists),
+    /// or '-' to read from stdin. Use '@<path>' to force interpretation as a
+    /// file path.
     #[arg(required_unless_present("setup"))] // Required if not doing setup
     pub prompt: Option<InputPrompt>,
 
@@ -57,8 +61,9 @@ pub struct GenerateArgs {
     #[arg(short, default_value_t = DEFAULT_NUM_IMAGES)]
     pub n: u8,
 
-    /// The size of the generated images (one of: 1024x1024, 1536x1024, 1024x1536,
-    /// auto, square, landscape, portrait)
+    /// The size of the generated images.
+    ///
+    /// One of: auto, 1024x1024, 1536x1024, 1024x1536, square, landscape, portrait
     #[arg(long, default_value = DEFAULT_SIZE)]
     pub size: String,
 
@@ -67,16 +72,23 @@ pub struct GenerateArgs {
     pub quality: String,
 
     // --- Edit-Specific Arguments ---
-    /// The image(s) to edit (path to image files). Providing this triggers the edit operation.
+    /// The image(s) to edit. Providing at least one input image triggers the
+    /// edit operation.
+    ///
+    /// Can be file paths or '-' to read from stdin. Use '@<path>' to force
+    /// interpretation as a file path.
     #[arg(short, long)]
     pub image: Option<Vec<InputImage>>,
 
-    /// A version of the first input image whose transparent areas indicate where to edit (edit only)
+    /// An image whose transparent areas indicate where to edit (edit only).
+    ///
+    /// Can be a file path or '-' to read from stdin. Use '@<path>' to force
+    /// interpretation as a file path.
     #[arg(short, long)]
     pub mask: Option<InputImage>,
 
     // --- Create-Specific Arguments ---
-    /// Set transparency for the background (transparent, opaque, auto) (create only)
+    /// Set the generated image background opacity (transparent, opaque, auto) (create only)
     #[arg(long, default_value = DEFAULT_BACKGROUND)]
     pub background: String,
 
@@ -84,11 +96,11 @@ pub struct GenerateArgs {
     #[arg(long, default_value = DEFAULT_MODERATION)]
     pub moderation: String,
 
-    /// The compression level for generated images (jpeg and webp only) (0-100) (create only)
+    /// The output image compression level (jpeg and webp only) (0-100) (create only)
     #[arg(long, default_value_t = DEFAULT_OUTPUT_COMPRESSION)]
     pub output_compression: u8,
 
-    /// The format of the generated images (png, jpeg, webp) (create only)
+    /// The output image format (png, jpeg, webp) (create only)
     #[arg(long, default_value = DEFAULT_OUTPUT_FORMAT)]
     pub output_format: String,
 }

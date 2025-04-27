@@ -1,4 +1,8 @@
+alias h := help
 alias w := watch-ci
+
+help:
+    cargo run -- --help
 
 ci:
     cargo fmt
