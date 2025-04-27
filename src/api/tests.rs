@@ -101,13 +101,13 @@ fn test_decode_response() {
 
 #[test]
 fn test_edit_request_build_multipart() {
-    let input_image = InputImageData {
+    let input_image = input::ImageData {
         bytes: b"dummy image".to_vec(),
         filename: PathBuf::from("test_image.jpg"),
         content_type: "image/jpeg",
     };
 
-    let input_mask = InputImageData {
+    let input_mask = input::ImageData {
         bytes: b"dummy mask".to_vec(),
         filename: PathBuf::from("test_mask.png"),
         content_type: "image/png",

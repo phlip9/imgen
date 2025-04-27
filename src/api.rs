@@ -1,4 +1,4 @@
-use crate::{cli::InputImageData, multipart};
+use crate::{cli::input, multipart};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -48,13 +48,13 @@ pub struct CreateRequest {
 /// Note: This is not Serialize because it needs to be multipart-form-encoded.
 pub struct EditRequest {
     /// The image(s) to edit, represented as processed data (path or bytes).
-    pub images: Vec<InputImageData>,
+    pub images: Vec<input::ImageData>,
 
     /// A text description of the desired image(s)
     pub prompt: String,
 
     /// An additional image whose transparent areas indicate where to edit
-    pub mask: Option<InputImageData>,
+    pub mask: Option<input::ImageData>,
 
     /// The model to use for image generation (always gpt-image-1 for this app)
     pub model: String,

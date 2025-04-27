@@ -2,19 +2,15 @@ use crate::{
     api::{CreateRequest, DecodedResponse, EditRequest, Response},
     client::Client,
     config::Config,
-    multipart,
 };
 use anyhow::Context;
 use clap::Parser;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{error, info, warn};
-use std::{
-    io::Read as _,
-    path::{Path, PathBuf},
-    str::FromStr,
-    time::Duration,
-};
+use std::time::Duration;
+
+pub mod input;
 
 // Default values for CLI options
 const DEFAULT_BACKGROUND: &str = "opaque";
@@ -60,7 +56,7 @@ pub struct GenerateArgs {
     /// or '-' to read from stdin. Use '@<path>' to force interpretation as a
     /// file path.
     #[arg(required_unless_present("setup"))] // Required if not doing setup
-    pub prompt: Option<InputPrompt>,
+    pub prompt: Option<input::Prompt>,
 
     /// The number of images to generate (1-10)
     #[arg(short, default_value_t = DEFAULT_NUM_IMAGES)]
@@ -83,14 +79,14 @@ pub struct GenerateArgs {
     /// Can be file paths or '-' to read from stdin. Use '@<path>' to force
     /// interpretation as a file path.
     #[arg(short, long)]
-    pub image: Option<Vec<InputImage>>,
+    pub image: Option<Vec<input::Image>>,
 
     /// An image whose transparent areas indicate where to edit (edit only).
     ///
     /// Can be a file path or '-' to read from stdin. Use '@<path>' to force
     /// interpretation as a file path.
     #[arg(short, long)]
-    pub mask: Option<InputImage>,
+    pub mask: Option<input::Image>,
 
     // --- Create-Specific Arguments ---
     /// Set the generated image background opacity (transparent, opaque, auto) (create only)
@@ -159,7 +155,7 @@ impl GenerateArgs {
         // Validate and read input prompt and images
         let prompt_source = self.prompt.context("Missing prompt")?;
         let inputs =
-            InputPromptAndImages::new(prompt_source, self.image, self.mask)?;
+            input::PromptAndImages::new(prompt_source, self.image, self.mask)?;
         let prompt = inputs.prompt.read_prompt()?;
 
         // Determine if we're using the edit API or the create API based on the
@@ -180,7 +176,7 @@ impl GenerateArgs {
             }
 
             // Read the image data
-            let images: Vec<InputImageData> = images
+            let images: Vec<input::ImageData> = images
                 .into_iter()
                 .map(|img| img.read_image())
                 .collect::<Result<Vec<_>, _>>()?;
@@ -293,192 +289,6 @@ fn spinner(progress: &MultiProgress) -> ProgressBar {
             .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
     );
     pb
-}
-
-// --- Prompt and Image Input Handling --- //
-
-/// Parsed prompt and image inputs from the command line. Ensures at most one
-/// input uses stdin.
-struct InputPromptAndImages {
-    prompt: InputPrompt,
-    images: Option<Vec<InputImage>>,
-    mask: Option<InputImage>,
-}
-
-/// Prompts can be a literal string, a file path, or stdin ('-').
-#[derive(Clone, Debug)]
-pub enum InputPrompt {
-    Literal(String),
-    File(PathBuf),
-    Stdin,
-}
-
-/// Image inputs can be a file path or stdin ('-').
-#[derive(Clone, Debug)]
-pub enum InputImage {
-    File(PathBuf),
-    Stdin,
-}
-
-/// The read image data, including the raw bytes and metadata.
-#[cfg_attr(test, derive(Clone))]
-pub struct InputImageData {
-    pub bytes: Vec<u8>,
-    pub filename: PathBuf,
-    pub content_type: &'static str,
-}
-
-impl InputPromptAndImages {
-    fn new(
-        prompt: InputPrompt,
-        images: Option<Vec<InputImage>>,
-        mask: Option<InputImage>,
-    ) -> anyhow::Result<Self> {
-        let prompt_stdin_count = matches!(prompt, InputPrompt::Stdin) as usize;
-        let mask_stdin_count = matches!(mask, Some(InputImage::Stdin)) as usize;
-
-        let images_stdin_count = match images {
-            Some(ref imgs) => imgs
-                .iter()
-                .map(|img| matches!(img, InputImage::Stdin) as usize)
-                .sum(),
-            None => 0,
-        };
-
-        let total_stdin_count =
-            prompt_stdin_count + mask_stdin_count + images_stdin_count;
-        if total_stdin_count > 1 {
-            return Err(anyhow::anyhow!(
-                "Only one input prompt or --image can be '-' (stdin) at a time"
-            ));
-        }
-
-        Ok(Self {
-            prompt,
-            images,
-            mask,
-        })
-    }
-}
-
-impl InputPrompt {
-    fn read_prompt(self) -> anyhow::Result<String> {
-        match self {
-            InputPrompt::Literal(prompt) => Ok(prompt),
-            InputPrompt::File(path) => std::fs::read_to_string(&path)
-                .with_context(|| {
-                    format!(
-                        "Failed to read prompt from file: {}",
-                        path.display()
-                    )
-                }),
-            InputPrompt::Stdin => {
-                let mut input = String::new();
-                std::io::stdin()
-                    .lock()
-                    .read_to_string(&mut input)
-                    .context("Failed to read prompt from stdin")?;
-                Ok(input)
-            }
-        }
-    }
-}
-
-impl FromStr for InputPrompt {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match LiteralOrFileOrStdin::from_str(s)? {
-            LiteralOrFileOrStdin::Literal(prompt) => Ok(Self::Literal(prompt)),
-            LiteralOrFileOrStdin::File(path) => Ok(Self::File(path)),
-            LiteralOrFileOrStdin::Stdin => Ok(Self::Stdin),
-        }
-    }
-}
-
-impl InputImage {
-    fn read_image(self) -> anyhow::Result<InputImageData> {
-        match self {
-            InputImage::File(path) => {
-                let bytes = std::fs::read(&path).with_context(|| {
-                    format!(
-                        "Failed to read image from file: {}",
-                        path.display()
-                    )
-                })?;
-                let content_type = multipart::mime_from_filename(&path)?;
-                Ok(InputImageData {
-                    bytes,
-                    filename: path,
-                    content_type,
-                })
-            }
-            InputImage::Stdin => {
-                let mut bytes = Vec::new();
-                std::io::stdin()
-                    .lock()
-                    .read_to_end(&mut bytes)
-                    .context("Failed to read image from stdin")?;
-
-                // Infer the content type from the bytes we read off stdin.
-                let content_type = multipart::mime_from_bytes(&bytes);
-
-                // Use fake filename for stdin: "stdin.{png,jpg,webp}"
-                let mut filename = PathBuf::from("stdin");
-                filename.set_extension(multipart::ext_from_mime(content_type)?);
-
-                Ok(InputImageData {
-                    bytes,
-                    filename,
-                    content_type,
-                })
-            }
-        }
-    }
-}
-
-impl FromStr for InputImage {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match LiteralOrFileOrStdin::from_str(s)? {
-            LiteralOrFileOrStdin::Literal(_) => Err(anyhow::anyhow!(
-                "Expected a file path or '-' for stdin for --image input"
-            )),
-            LiteralOrFileOrStdin::File(path) => Ok(Self::File(path)),
-            LiteralOrFileOrStdin::Stdin => Ok(Self::Stdin),
-        }
-    }
-}
-
-enum LiteralOrFileOrStdin {
-    Literal(String),
-    File(PathBuf),
-    Stdin,
-}
-
-impl FromStr for LiteralOrFileOrStdin {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Check for stdin input
-        if s == "-" {
-            return Ok(LiteralOrFileOrStdin::Stdin);
-        }
-
-        // Check if the string starts with '@' to indicate that the user
-        // explicitly wants only a file path
-        let (require_file, path) = if let Some(s) = s.strip_prefix('@') {
-            (true, Path::new(s))
-        } else {
-            (false, Path::new(s))
-        };
-
-        if path.exists() {
-            Ok(LiteralOrFileOrStdin::File(PathBuf::from(path)))
-        } else if !require_file {
-            Ok(LiteralOrFileOrStdin::Literal(String::from(s)))
-        } else {
-            Err(anyhow::anyhow!("File not found: {}", path.display()))
-        }
-    }
 }
 
 // --- Avoid passing CLI arguments that match the API default values ---
