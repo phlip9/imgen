@@ -28,9 +28,6 @@ pub enum Commands {
 
     /// Create an edited or extended image given one or more source images and a prompt using gpt-image-1
     Edit(EditArgs),
-
-    /// Test the cli
-    Test(TestArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -119,7 +116,6 @@ impl Commands {
         match self {
             Self::Create(args) => args.run(progress, client),
             Self::Edit(args) => args.run(progress, client),
-            Self::Test(args) => args.run(progress),
         }
     }
 }
@@ -213,27 +209,6 @@ impl EditArgs {
         // Handle the response (logging, decoding, saving)
         let resp = result?;
         handle_response(resp, &self.prompt, "edit")
-    }
-}
-
-impl TestArgs {
-    /// Run the test command
-    fn run(self, progress: &MultiProgress) -> anyhow::Result<()> {
-        // Placeholder for test functionality
-        info!("This is a log.");
-
-        let sp = spinner(progress);
-        sp.set_message("Running test...");
-
-        // Simulate some work
-        std::thread::sleep(Duration::from_secs(2));
-
-        sp.finish();
-        progress.remove(&sp);
-
-        info!("Test completed successfully.");
-
-        Ok(())
     }
 }
 
