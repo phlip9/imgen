@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::Context;
 use clap::Parser;
+use clap_verbosity_flag::{InfoLevel, Verbosity};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{error, info, warn};
 use std::{
@@ -43,6 +44,10 @@ pub struct Cli {
     // Embed the unified image generation arguments directly
     #[command(flatten)]
     pub args: GenerateArgs,
+
+    // Parse --verbose and --quiet flags. Default to INFO log level.
+    #[command(flatten)]
+    pub verbose: Verbosity<InfoLevel>,
 }
 
 // Unified arguments struct combining CreateArgs and EditArgs

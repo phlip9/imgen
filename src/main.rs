@@ -12,14 +12,16 @@ fn main() {
     // Load environment variables from .env file if present
     let _ = dotenvy::dotenv();
 
-    // Build the logger.
-    let env_logger = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
-    )
-    .format_file(false)
-    .format_target(false)
-    .format_timestamp(None)
-    .build();
+    // Parse command line arguments
+    let cli = Cli::parse();
+
+    // Build the stderr logger.
+    let env_logger = env_logger::Builder::new()
+        .filter_level(cli.verbose.log_level_filter())
+        .format_file(false)
+        .format_target(false)
+        .format_timestamp(None)
+        .build();
 
     // Wrap the logger so log messages and progress bars don't interfere with
     // each other.
@@ -27,9 +29,6 @@ fn main() {
     indicatif_log_bridge::LogWrapper::new(progress.clone(), env_logger)
         .try_init()
         .unwrap();
-
-    // Parse command line arguments
-    let cli = Cli::parse();
 
     // Run the CLI application
     if let Err(err) = cli.run(&progress) {

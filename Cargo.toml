@@ -13,6 +13,7 @@ repository = "https://github.com/phlip9/imgen"
 anyhow = "*"
 base64 = "*"
 clap = { version = "*",  features = ["derive", "env"] }
+clap-verbosity-flag = "*"
 directories = "*"
 dotenvy = "*"
 env_logger = { version = "*", default-features = false, features = ["auto-color"] }
