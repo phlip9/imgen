@@ -8,6 +8,15 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{error, info, warn};
 use std::time::Duration;
 
+// Default values for CLI options
+const DEFAULT_BACKGROUND: &str = "opaque";
+const DEFAULT_MODERATION: &str = "low";
+const DEFAULT_NUM_IMAGES: u8 = 1;
+const DEFAULT_OUTPUT_COMPRESSION: u8 = 100;
+const DEFAULT_OUTPUT_FORMAT: &str = "png";
+const DEFAULT_QUALITY: &str = "auto";
+const DEFAULT_SIZE: &str = "1024x1024";
+
 /// A CLI tool for generating and editing images using OpenAI's latest `gpt-image-1`
 /// image generation model.
 ///
@@ -34,16 +43,16 @@ pub struct GenerateArgs {
     pub prompt: String,
 
     /// The number of images to generate (1-10)
-    #[arg(short, long, default_value = "1")]
+    #[arg(short, long, default_value_t = DEFAULT_NUM_IMAGES)]
     pub n: u8,
 
     /// The size of the generated images (one of: 1024x1024, 1536x1024, 1024x1536,
     /// auto, square, landscape, portrait)
-    #[arg(long, default_value = "1024x1024")]
+    #[arg(long, default_value = DEFAULT_SIZE)]
     pub size: String,
 
     /// The quality of the image that will be generated (high, medium, low, auto)
-    #[arg(long, default_value = "auto")]
+    #[arg(long, default_value = DEFAULT_QUALITY)]
     pub quality: String,
 
     // --- Edit-Specific Arguments ---
@@ -57,19 +66,19 @@ pub struct GenerateArgs {
 
     // --- Create-Specific Arguments ---
     /// Set transparency for the background (transparent, opaque, auto) (create only)
-    #[arg(long, default_value = "opaque")]
+    #[arg(long, default_value = DEFAULT_BACKGROUND)]
     pub background: String,
 
     /// Control the content-moderation level (low, auto) (create only)
-    #[arg(long, default_value = "low")]
+    #[arg(long, default_value = DEFAULT_MODERATION)]
     pub moderation: String,
 
     /// The compression level for generated images (jpeg and webp only) (0-100) (create only)
-    #[arg(long, default_value = "100")]
+    #[arg(long, default_value_t = DEFAULT_OUTPUT_COMPRESSION)]
     pub output_compression: u8,
 
     /// The format of the generated images (png, jpeg, webp) (create only)
-    #[arg(long, default_value = "png")]
+    #[arg(long, default_value = DEFAULT_OUTPUT_FORMAT)]
     pub output_format: String,
 }
 
@@ -109,16 +118,16 @@ impl GenerateArgs {
         // presence of `--image` options
         let result = if let Some(images) = self.image {
             // Warn about create-API-only arguments if they are not default
-            if self.background != "opaque" {
+            if self.background != DEFAULT_BACKGROUND {
                 warn!("Ignoring --background option; it is only applicable when generating images without --image inputs.");
             }
-            if self.moderation != "low" {
+            if self.moderation != DEFAULT_MODERATION {
                 warn!("Ignoring --moderation option; it is only applicable when generating images without --image inputs.");
             }
-            if self.output_compression != 100 {
+            if self.output_compression != DEFAULT_OUTPUT_COMPRESSION {
                 warn!("Ignoring --output-compression option; it is only applicable when generating images without --image inputs.");
             }
-            if self.output_format != "png" {
+            if self.output_format != DEFAULT_OUTPUT_FORMAT {
                 warn!("Ignoring --output-format option; it is only applicable when generating images without --image inputs.");
             }
 
@@ -227,7 +236,7 @@ fn spinner(progress: &MultiProgress) -> ProgressBar {
     pb
 }
 
-// --- CLI option canonicalization functions ---
+// --- Avoid passing CLI arguments that match the API default values ---
 
 fn n_canonical(n: u8) -> Option<u8> {
     if n == 1 {
