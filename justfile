@@ -8,7 +8,7 @@ ci:
 watch-ci:
     cargo watch --why --shell "just ci"
 
-# `just release patch [--execute]`
+# `just release <major|minor|patch> [--execute]`
 release *args:
     cargo release --no-publish {{ args }}
 
