@@ -3,11 +3,18 @@ use log::info;
 use std::error::Error;
 use std::fmt;
 use std::io;
+use std::time::Duration;
 use std::time::Instant;
 use ureq::http::{self, HeaderValue};
 use ureq::typestate::WithBody;
 
+/// OpenAI API endpoint
 static BASE_URL: &str = "https://api.openai.com/v1";
+
+/// End-to-end timeout for requests.
+///
+/// Our timeout needs to long to handle OpenAI's glacial image generation time.
+const TIMEOUT: Duration = Duration::from_secs(20 * 60); // 20 min
 
 /// Error type for OpenAI API client operations
 #[derive(Debug)]
@@ -72,6 +79,7 @@ impl Client {
                     .root_certs(ureq::tls::RootCerts::PlatformVerifier)
                     .build(),
             )
+            .timeout_global(Some(TIMEOUT))
             .build();
         let agent = ureq::Agent::new_with_config(config);
         Self { agent, auth }
