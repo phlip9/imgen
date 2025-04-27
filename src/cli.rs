@@ -27,7 +27,7 @@ const DEFAULT_SIZE: &str = "1024x1024";
 pub struct Cli {
     /// OpenAI API key (can also be set via `OPENAI_API_KEY` environment variable)
     #[arg(short, long, env = "OPENAI_API_KEY", hide_env = true)]
-    pub api_key: Option<String>,
+    pub openai_api_key: Option<String>,
 
     // Embed the unified image generation arguments directly
     #[command(flatten)]
@@ -85,10 +85,12 @@ pub struct GenerateArgs {
 impl Cli {
     pub fn run(self, progress: &MultiProgress) -> anyhow::Result<()> {
         // Get API key from CLI args or environment
-        let api_key = self.api_key.context(
+        let api_key = self.openai_api_key.context(
             "Error: API key is required. Provide it with --api-key or set the \
              `OPENAI_API_KEY` environment variable.",
         )?;
+
+        // Setup the OpenAI API client
         let client = Client::new(api_key);
 
         // Set up the spinner
@@ -213,7 +215,7 @@ fn handle_response(resp: Response, prompt: &str) -> anyhow::Result<()> {
 
     // Save the images to files
     let saved_files = decoded_resp
-        .save_images(&file_prefix)
+        .save_images(file_prefix)
         .context("Failed to save images to files")?;
 
     info!("Saved images to: {:?}", saved_files);

@@ -13,6 +13,7 @@ repository = "https://github.com/phlip9/imgen"
 anyhow = "*"
 base64 = "*"
 clap = { version = "*",  features = ["derive", "env"] }
+directories = "*" # Added for platform-specific config paths
 dotenvy = "*"
 env_logger = { version = "*", default-features = false, features = ["auto-color"] }
 indicatif = "*"
@@ -21,6 +22,7 @@ log = "*"
 rand = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
+# thiserror = "*" # Removed this dependency
 ureq = { version = "*", default-features = false, features = [
     "gzip",
     "json",
