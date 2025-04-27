@@ -64,7 +64,15 @@ impl Client {
     pub fn new(api_key: String) -> Self {
         let auth = HeaderValue::try_from(format!("Bearer {}", api_key))
             .expect("Invalid API key format");
-        let config = ureq::config::Config::builder().https_only(true).build();
+        let config = ureq::config::Config::builder()
+            .https_only(true)
+            .tls_config(
+                ureq::tls::TlsConfig::builder()
+                    .provider(ureq::tls::TlsProvider::NativeTls)
+                    .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                    .build(),
+            )
+            .build();
         let agent = ureq::Agent::new_with_config(config);
         Self { agent, auth }
     }
