@@ -23,7 +23,7 @@ install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
 # Uncomment to test full multi-platform release build and upload in pull request CI
-# Which actions to run on pull requests
+# Which actions to run on pull requests.
 pr-run-mode = "upload"
 
 
