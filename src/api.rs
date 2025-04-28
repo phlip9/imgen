@@ -1,6 +1,9 @@
+use std::{io::Write, path::Path};
+
 use crate::{cli::input, multipart};
 use anyhow::Context;
 use base64::{prelude::BASE64_STANDARD, Engine};
+use log::warn;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -243,30 +246,82 @@ impl TryFrom<Response> for DecodedResponse {
 }
 
 impl DecodedImageData {
-    /// Save the image to a file
-    pub fn save_to_file(&self, path: &str) -> anyhow::Result<()> {
+    /// Save the image to a file path
+    fn save_to_file(&self, path: &Path) -> anyhow::Result<()> {
         std::fs::write(path, &self.image_bytes)
-            .with_context(|| format!("Failed to write to: {path}"))
+            .with_context(|| format!("Failed to write to: {}", path.display()))
+    }
+
+    /// Save the image to a file path or stdout
+    fn save_to_file_or_stdout(
+        &self,
+        path: Option<&Path>,
+    ) -> anyhow::Result<()> {
+        if let Some(path) = path {
+            self.save_to_file(path)
+        } else {
+            // Save to stdout
+            let mut stdout = std::io::stdout().lock();
+            stdout
+                .write_all(&self.image_bytes)
+                .with_context(|| "Failed to write to stdout")?;
+            stdout.flush()?;
+            Ok(())
+        }
     }
 }
 
 impl DecodedResponse {
-    /// Save all images to files with the given prefix and extension.
+    /// Save image(s) to the specified output target.
     pub fn save_images(
         &self,
-        prefix: &str,
-        extension: &str,
+        out_target: input::OutputTargetWithData<'_>,
     ) -> anyhow::Result<Vec<String>> {
-        let mut paths = Vec::with_capacity(self.data.len());
+        use input::OutputTargetWithData::*;
 
-        for (i, image) in self.data.iter().enumerate() {
-            // Ensure the extension doesn't start with a dot
-            let ext = extension.trim_start_matches('.');
-            let path = format!("{}.{}.{}.{}", prefix, self.created, i + 1, ext);
-            image.save_to_file(&path)?;
-            paths.push(path);
+        match out_target {
+            Automatic { prefix, extension } => {
+                // Write to files with a prefix and extension
+                let mut paths = Vec::with_capacity(self.data.len());
+                for (i, image) in self.data.iter().enumerate() {
+                    // Ensure the extension doesn't start with a dot
+                    let ext = extension.trim_start_matches('.');
+                    let path = format!(
+                        "{}.{}.{}.{}",
+                        prefix,
+                        self.created,
+                        i + 1,
+                        ext
+                    );
+                    image.save_to_file(Path::new(&path))?;
+                    paths.push(path);
+                }
+                Ok(paths)
+            }
+            // Write a single output image to a file or stdout
+            File(_) | Stdout => {
+                let image_data = match self.data.as_slice() {
+                    [image] => image,
+                    [image, ..] => {
+                        let n = self.data.len();
+                        warn!(
+                            "API unexpectedly returned multiple images ({n}), \
+                             using the first one",
+                        );
+                        image
+                    }
+                    [] => anyhow::bail!("API unexpectedly returned no images"),
+                };
+
+                let path = out_target.file_path();
+                image_data.save_to_file_or_stdout(path)?;
+
+                let path_str = match path {
+                    Some(path) => path.display().to_string(),
+                    None => "stdout".to_owned(),
+                };
+                Ok(vec![path_str])
+            }
         }
-
-        Ok(paths)
     }
 }

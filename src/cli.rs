@@ -1,10 +1,10 @@
 use crate::{
     api::{CreateRequest, DecodedResponse, EditRequest, Response},
-    cli::{input::OutputTarget, spinner::Spinner},
+    cli::spinner::Spinner,
     client::Client,
     config::Config,
 };
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use clap::Parser;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
 use indicatif::MultiProgress;
@@ -169,13 +169,11 @@ impl GenerateArgs {
             self.n,
         )?;
         let prompt = inputs.prompt.read_prompt()?;
-
-        // Use a sanitized prompt as the file prefix *only* for automatic output
-        let out_prefix = if matches!(inputs.output, OutputTarget::Automatic) {
-            Some(sanitize::prompt_prefix(&prompt))
-        } else {
-            None // Not needed if output is stdout or a specific file
-        };
+        let out_target = inputs.out_target.with_data(
+            inputs.images.is_some(),
+            &prompt,
+            &self.output_format,
+        );
 
         // Determine if we're using the edit API or the create API based on the
         // presence of `--image` options
@@ -242,12 +240,7 @@ impl GenerateArgs {
 
         // Handle the response (logging, decoding, saving/writing)
         let response = result?;
-        handle_response(
-            response,
-            inputs.output,
-            out_prefix.as_deref(),
-            &self.output_format,
-        )
+        handle_response(response, out_target)
     }
 }
 
@@ -256,9 +249,7 @@ impl GenerateArgs {
 /// Decodes images, calculates cost, and saves/writes the output based on the target.
 fn handle_response(
     resp: Response,
-    output_target: OutputTarget,
-    out_prefix: Option<&str>,
-    output_format: &str,
+    out_target: input::OutputTargetWithData<'_>,
 ) -> anyhow::Result<()> {
     // Calculate and display cost information
     let cost = resp.usage.calculate_cost();
@@ -275,42 +266,7 @@ fn handle_response(
         .context("Failed to decode base64 image data")?;
 
     // Handle output based on the target
-    match output_target {
-        OutputTarget::Automatic => {
-            let prefix = out_prefix.ok_or_else(|| {
-                anyhow!(
-                    "Internal error: out_prefix is None for Automatic output"
-                )
-            })?;
-            // Save the images to automatically generated file names
-            let saved_files = decoded_resp
-                .save_images(prefix, output_format) // Use output_format for extension
-                .context("Failed to save images")?;
-            info!("Saved image(s) to: {}", saved_files.join(", "));
-        }
-        OutputTarget::File(_) | OutputTarget::Stdout => {
-            // Should only have one image due to validation in InputArgs::new
-            let image_data = match decoded_resp.data.as_slice() {
-                [image_data] => image_data,
-                _ => {
-                    return Err(anyhow!(
-                        "Internal error: Expected 1 image for File/Stdout output, got {}",
-                        decoded_resp.data.len()
-                    ));
-                }
-            };
-            output_target
-                .write_image(image_data)
-                .context("Failed to write image to output target")?;
-
-            // Log differently for file vs stdout
-            if let OutputTarget::File(ref path) = output_target {
-                info!("Saved image to: {}", path.display());
-            } else {
-                // No message needed for stdout, the data is the output
-            }
-        }
-    }
+    decoded_resp.save_images(out_target)?;
 
     Ok(())
 }

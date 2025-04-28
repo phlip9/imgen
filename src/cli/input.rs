@@ -1,21 +1,20 @@
 //! Prompt and image input handling
 
 use anyhow::{anyhow, Context};
-use std::ffi::{OsStr, OsString};
-use std::io::{self, Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use crate::api::DecodedImageData;
+use crate::cli::sanitize;
 use crate::multipart;
 
-/// Parsed prompt and image inputs from the command line. Ensures at most one
-/// input uses stdin. Also stores the desired output target.
+/// Parsed inputs from the command line. Ensures at most one input uses stdin.
+/// Also stores the desired output target.
 pub struct InputArgs {
     pub prompt: PromptArg,
     pub images: Option<Vec<ImageArg>>,
     pub mask: Option<ImageArg>,
-    pub output: OutputTarget,
+    pub out_target: OutputTarget,
 }
 
 /// Prompts can be a literal string, a file path, or stdin ('-').
@@ -42,13 +41,19 @@ pub enum OutputArg {
 }
 
 /// Represents the validated output destination for the generated image(s).
-#[derive(Clone, Debug)]
 pub enum OutputTarget {
     /// Save automatically based on prompt, timestamp, and index.
     Automatic,
     /// Save to a specific file path. Only valid for n=1.
     File(PathBuf),
     /// Write to standard output. Only valid for n=1.
+    Stdout,
+}
+
+/// [`OutputTarget`] with additional data needed to write the output files.
+pub enum OutputTargetWithData<'a> {
+    Automatic { prefix: String, extension: &'a str },
+    File(&'a Path),
     Stdout,
 }
 
@@ -94,7 +99,7 @@ impl InputArgs {
         }
 
         // Non-automatic output target must be used with `-n 1`
-        let output = match output_arg {
+        let out_target = match output_arg {
             // Default to automatic naming
             None => OutputTarget::Automatic,
             Some(OutputArg::File(path)) => {
@@ -119,7 +124,7 @@ impl InputArgs {
             prompt,
             images,
             mask,
-            output,
+            out_target,
         })
     }
 }
@@ -127,15 +132,16 @@ impl InputArgs {
 impl PromptArg {
     pub fn read_prompt(self) -> anyhow::Result<String> {
         match self {
-            PromptArg::Literal(prompt) => Ok(prompt),
-            PromptArg::File(path) => std::fs::read_to_string(&path)
-                .with_context(|| {
+            Self::Literal(prompt) => Ok(prompt),
+            Self::File(path) => {
+                std::fs::read_to_string(&path).with_context(|| {
                     format!(
                         "Failed to read prompt from file: {}",
                         path.display()
                     )
-                }),
-            PromptArg::Stdin => {
+                })
+            }
+            Self::Stdin => {
                 let mut input = String::new();
                 std::io::stdin()
                     .lock()
@@ -244,39 +250,49 @@ impl FromStr for LiteralOrFileOrStdin {
     }
 }
 
-impl From<OsString> for OutputArg {
-    fn from(s: OsString) -> Self {
-        if s == OsStr::new("-") {
-            OutputArg::Stdout
+impl From<String> for OutputArg {
+    fn from(s: String) -> Self {
+        if s == "-" {
+            Self::Stdout
+        } else if let Some(s) = s.strip_prefix('@') {
+            Self::File(PathBuf::from(s))
         } else {
-            OutputArg::File(PathBuf::from(s))
+            Self::File(PathBuf::from(s))
         }
     }
 }
 
 impl OutputTarget {
-    /// Writes the image data to the specified target.
-    pub fn write_image(
-        &self,
-        image_data: &DecodedImageData,
-    ) -> anyhow::Result<()> {
+    /// Enrich the output target with additional data we need to actually write
+    /// the output.
+    pub fn with_data<'a>(
+        &'a self,
+        uses_edit_api: bool,
+        prompt: &str,
+        output_format: &'a str,
+    ) -> OutputTargetWithData<'a> {
         match self {
-            OutputTarget::Automatic => {
-                // This case should be handled by the caller using save_images
-                unreachable!(
-                    "Automatic output target should be handled separately"
-                );
+            Self::Automatic => {
+                let prefix = sanitize::prompt_prefix(prompt);
+                let extension = if uses_edit_api {
+                    // "edit" API only supports PNG output
+                    "png"
+                } else {
+                    output_format
+                };
+                OutputTargetWithData::Automatic { prefix, extension }
             }
-            OutputTarget::File(path) => {
-                image_data
-                    .save_to_file(path.to_str().unwrap_or("output.image"))?;
-            }
-            OutputTarget::Stdout => {
-                let mut handle = io::stdout().lock();
-                handle.write_all(&image_data.image_bytes)?;
-                handle.flush()?;
-            }
+            Self::File(path) => OutputTargetWithData::File(path),
+            Self::Stdout => OutputTargetWithData::Stdout,
         }
-        Ok(())
+    }
+}
+
+impl<'a> OutputTargetWithData<'a> {
+    pub fn file_path(&self) -> Option<&'a Path> {
+        match self {
+            Self::File(path) => Some(path),
+            Self::Automatic { .. } | Self::Stdout => None,
+        }
     }
 }
