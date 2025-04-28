@@ -95,7 +95,7 @@ pub struct GenerateArgs {
     ///
     /// Supported input image formats:
     /// • png, jpeg, webp
-    #[arg(short, long, group = "edit", verbatim_doc_comment)]
+    #[arg(short, long, verbatim_doc_comment)]
     #[arg(help_heading = "Input Options (edit)")]
     pub image: Vec<input::ImageArg>,
 
@@ -106,7 +106,7 @@ pub struct GenerateArgs {
     ///
     /// Supported input mask image formats:
     /// • png, jpeg, webp
-    #[arg(short, long, group = "edit", verbatim_doc_comment)]
+    #[arg(short, long, verbatim_doc_comment)]
     #[arg(help_heading = "Input Options (edit)")]
     pub mask: Option<input::ImageArg>,
 
@@ -144,22 +144,22 @@ pub struct GenerateArgs {
 
     /// Set the desired background opacity of the generated image (create only)
     /// One of: transparent, opaque, auto
-    #[arg(long, group = "create", default_value = DEFAULT_BACKGROUND)]
+    #[arg(long, default_value = DEFAULT_BACKGROUND)]
     #[arg(help_heading = "Output Options (create)", verbatim_doc_comment)]
     pub background: String,
 
     /// Control the content-moderation level (low, auto) (create only)
-    #[arg(long, group = "create", default_value = DEFAULT_MODERATION)]
+    #[arg(long, default_value = DEFAULT_MODERATION)]
     #[arg(help_heading = "Output Options (create)")]
     pub moderation: String,
 
     /// The output image compression level (jpeg and webp only) (0-100) (create only)
-    #[arg(long, group = "create", default_value_t = DEFAULT_OUTPUT_COMPRESSION)]
+    #[arg(long, default_value_t = DEFAULT_OUTPUT_COMPRESSION)]
     #[arg(help_heading = "Output Options (create)")]
     pub output_compression: u8,
 
     /// The output image format (png, jpeg, webp) (create only)
-    #[arg(long, group = "create", default_value = DEFAULT_OUTPUT_FORMAT)]
+    #[arg(long, default_value = DEFAULT_OUTPUT_FORMAT)]
     #[arg(help_heading = "Output Options (create)")]
     pub output_format: String,
 }
