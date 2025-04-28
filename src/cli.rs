@@ -15,7 +15,7 @@ mod sanitize;
 mod spinner;
 
 // Default values for CLI options
-const DEFAULT_BACKGROUND: &str = "opaque";
+const DEFAULT_BACKGROUND: &str = "auto";
 const DEFAULT_MODERATION: &str = "low";
 const DEFAULT_NUM_IMAGES: u8 = 1;
 const DEFAULT_OUTPUT_COMPRESSION: u8 = 100;
@@ -28,12 +28,14 @@ const DEFAULT_SIZE: &str = "1024x1024";
 /// imgen generates images using OpenAI's `gpt-image-1` image generation model.
 ///
 /// The tool operates in two modes: 'create' mode by default, or 'edit' mode
-/// when one or more `--image` inputs are provided.
+/// when one or more `--image` inputs are provided. Some options are only
+/// applicable in one mode or the other.
 ///
 /// The OpenAI API key is sourced in this order:
 /// • from the command line with `--openai-api-key`
-/// • from the environment variable `OPENAI_API_KEY` (.env file supported)
-/// • from the config file `~/.config/imgen/config.json`
+/// • from the environment variable `OPENAI_API_KEY`
+/// • from `OPENAI_API_KEY` in a `.env` file
+/// • from the config file `~/.config/imgen/config.json` (--setup to create)
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about)]
 #[clap(verbatim_doc_comment)]
@@ -58,7 +60,6 @@ pub struct Cli {
 // Unified arguments struct combining CreateArgs and EditArgs
 #[derive(Parser, Debug)]
 pub struct GenerateArgs {
-    // --- Main Arguments ---
     /// A text description of the desired image(s) (Required unless --setup)
     ///
     /// Can be a literal string, a path to a text file (if the path exists),
@@ -67,7 +68,6 @@ pub struct GenerateArgs {
     #[arg(verbatim_doc_comment, required_unless_present("setup"))]
     pub prompt: Option<input::PromptArg>,
 
-    // --- Edit-specific Arguments ---
     /// Input image(s) to edit. Providing at least one input image triggers the
     /// edit operation.
     ///
@@ -93,15 +93,16 @@ pub struct GenerateArgs {
 
     /// Save the generated output image to this path (only supported with `-n 1`).
     ///
-    /// If not specified, automatically saves to files based on the prompt, e.g.,
-    /// "a_cute_cat.<timestamp>.<i>.png".
+    /// If not specified, automatically saves to files based on the prompt.
+    /// Ex: prompt='A cute cat saying "hello" on the Moon' will save to
+    /// "a_cute_cat_saying_hello.<timestamp>.<i>.png" in the current directory.
     ///
     /// Can be a file path or '-' to write to stdout. Use '@<path>' to force
     /// interpretation as a file path.
     ///
     /// Supported output image formats:
-    /// • png, jpeg, webp (no --image inputs)
-    /// • png (with --image inputs)
+    /// • png, jpeg, webp  (no --image inputs)
+    /// • png              (with --image inputs)
     #[arg(short, long, verbatim_doc_comment)]
     #[arg(help_heading = "Output Options")]
     pub output: Option<input::OutputArg>,
@@ -112,7 +113,6 @@ pub struct GenerateArgs {
     pub n: u8,
 
     /// The size of the generated images.
-    ///
     /// One of: auto, 1024x1024, 1536x1024, 1024x1536, square, landscape, portrait
     #[arg(long, default_value = DEFAULT_SIZE)]
     #[arg(help_heading = "Output Options")]
@@ -123,10 +123,10 @@ pub struct GenerateArgs {
     #[arg(help_heading = "Output Options")]
     pub quality: String,
 
-    // --- Create-Specific Arguments ---
-    /// Set the generated image background opacity (transparent, opaque, auto) (create only)
+    /// Set the desired background opacity of the generated image (create only)
+    /// One of: transparent, opaque, auto
     #[arg(long, group = "create", default_value = DEFAULT_BACKGROUND)]
-    #[arg(help_heading = "Output Options (create)")]
+    #[arg(help_heading = "Output Options (create)", verbatim_doc_comment)]
     pub background: String,
 
     /// Control the content-moderation level (low, auto) (create only)
