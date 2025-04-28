@@ -31,6 +31,25 @@ const DEFAULT_SIZE: &str = "1024x1024";
 /// when one or more `--image` inputs are provided. Some options are only
 /// applicable in one mode or the other.
 ///
+/// Example usage:
+///
+/// ```
+/// # Save <your_api_key> to the config file (`~/.config/imgen/config.json`)
+/// imgen --setup --openai-api-key <your_api_key>
+///
+/// # Generate a single image from a prompt
+/// imgen "A cute cat saying 'hello' on the Moon"
+///
+/// # Generate images using other images as a reference
+/// imgen -i cat.png -i hat.png "A photo of the cat weaing the hat"
+///
+/// # Edit an image using a mask
+/// imgen -i pool.png -m mask.png "A sunlit pool containing a flamingo"
+///
+/// # Build image generation pipelines using standard unix pipes
+/// cat dog.webp | imgen -i - -o - prompt.md | gzip -c | hexyl
+/// ```
+///
 /// The OpenAI API key is sourced in this order:
 /// • from the command line with `--openai-api-key`
 /// • from the environment variable `OPENAI_API_KEY`
@@ -78,7 +97,7 @@ pub struct GenerateArgs {
     /// • png, jpeg, webp
     #[arg(short, long, group = "edit", verbatim_doc_comment)]
     #[arg(help_heading = "Input Options (edit)")]
-    pub image: Option<Vec<input::ImageArg>>,
+    pub image: Vec<input::ImageArg>,
 
     /// An image whose transparent areas indicate where to edit (edit only).
     ///
@@ -195,15 +214,16 @@ impl GenerateArgs {
             self.n,
         )?;
         let prompt = inputs.prompt.read_prompt()?;
+        let uses_edit_api = !inputs.images.is_empty();
         let out_target = inputs.out_target.with_data(
-            inputs.images.is_some(),
+            uses_edit_api,
             &prompt,
             &self.output_format,
         );
 
         // Determine if we're using the edit API or the create API based on the
         // presence of `--image` options
-        let result = if let Some(images) = inputs.images {
+        let result = if uses_edit_api {
             // Warn about create-API-only arguments if they are not default
             if self.background != DEFAULT_BACKGROUND {
                 warn!("Ignoring --background option; it is only applicable when generating images without --image inputs.");
@@ -219,7 +239,8 @@ impl GenerateArgs {
             }
 
             // Read the image data
-            let images: Vec<input::ImageData> = images
+            let images: Vec<input::ImageData> = inputs
+                .images
                 .into_iter()
                 .map(|img| img.read_image())
                 .collect::<Result<Vec<_>, _>>()?;

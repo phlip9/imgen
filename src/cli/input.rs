@@ -12,7 +12,7 @@ use crate::multipart;
 /// Also stores the desired output target.
 pub struct InputArgs {
     pub prompt: PromptArg,
-    pub images: Option<Vec<ImageArg>>,
+    pub images: Vec<ImageArg>,
     pub mask: Option<ImageArg>,
     pub out_target: OutputTarget,
 }
@@ -74,7 +74,7 @@ impl InputArgs {
     /// * `--output` is specified (not automatic) but `n` is not 1.
     pub fn new(
         prompt: PromptArg,
-        images: Option<Vec<ImageArg>>,
+        images: Vec<ImageArg>,
         mask: Option<ImageArg>,
         output_arg: Option<OutputArg>,
         n: u8,
@@ -82,13 +82,10 @@ impl InputArgs {
         // Only use stdin once across all inputs
         let prompt_stdin_count = matches!(prompt, PromptArg::Stdin) as usize;
         let mask_stdin_count = matches!(mask, Some(ImageArg::Stdin)) as usize;
-        let images_stdin_count = match &images {
-            Some(ref imgs) => imgs
-                .iter()
-                .map(|img| matches!(img, ImageArg::Stdin) as usize)
-                .sum(),
-            None => 0,
-        };
+        let images_stdin_count = images
+            .iter()
+            .map(|img| matches!(img, ImageArg::Stdin) as usize)
+            .sum::<usize>();
 
         let total_stdin_count =
             prompt_stdin_count + mask_stdin_count + images_stdin_count;
