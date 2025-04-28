@@ -1,10 +1,10 @@
 use crate::{
     api::{CreateRequest, DecodedResponse, EditRequest, Response},
-    cli::spinner::Spinner,
+    cli::{input::OutputTarget, spinner::Spinner},
     client::Client,
     config::Config,
 };
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use clap::Parser;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
 use indicatif::MultiProgress;
@@ -51,44 +51,40 @@ pub struct Cli {
 // Unified arguments struct combining CreateArgs and EditArgs
 #[derive(Parser, Debug)]
 pub struct GenerateArgs {
-    // --- Common Arguments ---
+    // --- Main Arguments ---
     /// A text description of the desired image(s).
     ///
     /// Can be a literal string, a path to a text file (if the path exists),
     /// or '-' to read from stdin. Use '@<path>' to force interpretation as a
     /// file path.
     #[arg(required_unless_present("setup"))] // Required if not doing setup
-    pub prompt: Option<input::Prompt>,
+    pub prompt: Option<input::PromptArg>,
 
-    /// The number of images to generate (1-10)
-    #[arg(short, default_value_t = DEFAULT_NUM_IMAGES)]
-    pub n: u8,
-
-    /// The size of the generated images.
+    /// Where to save the output image (only supported with `-n 1`).
     ///
-    /// One of: auto, 1024x1024, 1536x1024, 1024x1536, square, landscape, portrait
-    #[arg(long, default_value = DEFAULT_SIZE)]
-    pub size: String,
+    /// If not specified, automatically saves to files based on the prompt, e.g.,
+    /// "a_cute_cat.<timestamp>.<i>.png".
+    ///
+    /// Use '-' to write the image data to standard output (only works with -n 1).
+    /// Use a file path to save to a specific file (only works with -n 1).
+    #[arg(short, long)]
+    pub output: Option<input::OutputArg>,
 
-    /// The quality of the image that will be generated (high, medium, low, auto)
-    #[arg(long, default_value = DEFAULT_QUALITY)]
-    pub quality: String,
-
-    // --- Edit-Specific Arguments ---
+    // --- Edit-specific Arguments ---
     /// The image(s) to edit. Providing at least one input image triggers the
     /// edit operation.
     ///
     /// Can be file paths or '-' to read from stdin. Use '@<path>' to force
     /// interpretation as a file path.
     #[arg(short, long)]
-    pub image: Option<Vec<input::Image>>,
+    pub image: Option<Vec<input::ImageArg>>,
 
     /// An image whose transparent areas indicate where to edit (edit only).
     ///
     /// Can be a file path or '-' to read from stdin. Use '@<path>' to force
     /// interpretation as a file path.
     #[arg(short, long)]
-    pub mask: Option<input::Image>,
+    pub mask: Option<input::ImageArg>,
 
     // --- Create-Specific Arguments ---
     /// Set the generated image background opacity (transparent, opaque, auto) (create only)
@@ -106,6 +102,21 @@ pub struct GenerateArgs {
     /// The output image format (png, jpeg, webp) (create only)
     #[arg(long, default_value = DEFAULT_OUTPUT_FORMAT)]
     pub output_format: String,
+
+    // --- Common Arguments ---
+    /// The number of images to generate (1-10)
+    #[arg(short, default_value_t = DEFAULT_NUM_IMAGES)]
+    pub n: u8,
+
+    /// The size of the generated images.
+    ///
+    /// One of: auto, 1024x1024, 1536x1024, 1024x1536, square, landscape, portrait
+    #[arg(long, default_value = DEFAULT_SIZE)]
+    pub size: String,
+
+    /// The quality of the image that will be generated (high, medium, low, auto)
+    #[arg(long, default_value = DEFAULT_QUALITY)]
+    pub quality: String,
 }
 
 impl Cli {
@@ -148,14 +159,23 @@ impl Cli {
 impl GenerateArgs {
     /// Run the appropriate image generation or editing command based on args
     fn run(self, client: &Client) -> anyhow::Result<()> {
-        // Validate and read input prompt and images
+        // Validate and read input prompt, images, and output target
         let prompt_source = self.prompt.context("Missing prompt")?;
-        let inputs =
-            input::PromptAndImages::new(prompt_source, self.image, self.mask)?;
+        let inputs = input::InputArgs::new(
+            prompt_source,
+            self.image,
+            self.mask,
+            self.output,
+            self.n,
+        )?;
         let prompt = inputs.prompt.read_prompt()?;
 
-        // Use a sanitized prompt as the file prefix
-        let out_prefix = sanitize::prompt_prefix(&prompt);
+        // Use a sanitized prompt as the file prefix *only* for automatic output
+        let out_prefix = if matches!(inputs.output, OutputTarget::Automatic) {
+            Some(sanitize::prompt_prefix(&prompt))
+        } else {
+            None // Not needed if output is stdout or a specific file
+        };
 
         // Determine if we're using the edit API or the create API based on the
         // presence of `--image` options
@@ -220,14 +240,26 @@ impl GenerateArgs {
             client.create_images(req)
         };
 
-        // Handle the response (logging, decoding, saving)
+        // Handle the response (logging, decoding, saving/writing)
         let response = result?;
-        handle_response(response, &out_prefix)
+        handle_response(
+            response,
+            inputs.output,
+            out_prefix.as_deref(),
+            &self.output_format,
+        )
     }
 }
 
 /// Handles the common logic after receiving an API response.
-fn handle_response(resp: Response, out_prefix: &str) -> anyhow::Result<()> {
+///
+/// Decodes images, calculates cost, and saves/writes the output based on the target.
+fn handle_response(
+    resp: Response,
+    output_target: OutputTarget,
+    out_prefix: Option<&str>,
+    output_format: &str,
+) -> anyhow::Result<()> {
     // Calculate and display cost information
     let cost = resp.usage.calculate_cost();
     info!(
@@ -242,12 +274,43 @@ fn handle_response(resp: Response, out_prefix: &str) -> anyhow::Result<()> {
     let decoded_resp = DecodedResponse::try_from(resp)
         .context("Failed to decode base64 image data")?;
 
-    // Save the images to files
-    let saved_files = decoded_resp
-        .save_images(out_prefix)
-        .context("Failed to save images to files")?;
+    // Handle output based on the target
+    match output_target {
+        OutputTarget::Automatic => {
+            let prefix = out_prefix.ok_or_else(|| {
+                anyhow!(
+                    "Internal error: out_prefix is None for Automatic output"
+                )
+            })?;
+            // Save the images to automatically generated file names
+            let saved_files = decoded_resp
+                .save_images(prefix, output_format) // Use output_format for extension
+                .context("Failed to save images")?;
+            info!("Saved image(s) to: {}", saved_files.join(", "));
+        }
+        OutputTarget::File(_) | OutputTarget::Stdout => {
+            // Should only have one image due to validation in InputArgs::new
+            let image_data = match decoded_resp.data.as_slice() {
+                [image_data] => image_data,
+                _ => {
+                    return Err(anyhow!(
+                        "Internal error: Expected 1 image for File/Stdout output, got {}",
+                        decoded_resp.data.len()
+                    ));
+                }
+            };
+            output_target
+                .write_image(image_data)
+                .context("Failed to write image to output target")?;
 
-    info!("Saved images to: {}", saved_files.join(", "));
+            // Log differently for file vs stdout
+            if let OutputTarget::File(ref path) = output_target {
+                info!("Saved image to: {}", path.display());
+            } else {
+                // No message needed for stdout, the data is the output
+            }
+        }
+    }
 
     Ok(())
 }

@@ -1,7 +1,7 @@
 use crate::{cli::input, multipart};
+use anyhow::Context;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use serde::{Deserialize, Serialize};
-use std::io;
 
 #[cfg(test)]
 mod tests;
@@ -244,18 +244,25 @@ impl TryFrom<Response> for DecodedResponse {
 
 impl DecodedImageData {
     /// Save the image to a file
-    pub fn save_to_file(&self, path: &str) -> io::Result<()> {
+    pub fn save_to_file(&self, path: &str) -> anyhow::Result<()> {
         std::fs::write(path, &self.image_bytes)
+            .with_context(|| format!("Failed to write to: {path}"))
     }
 }
 
 impl DecodedResponse {
-    /// Save all images to files with the given prefix
-    pub fn save_images(&self, prefix: &str) -> io::Result<Vec<String>> {
+    /// Save all images to files with the given prefix and extension.
+    pub fn save_images(
+        &self,
+        prefix: &str,
+        extension: &str,
+    ) -> anyhow::Result<Vec<String>> {
         let mut paths = Vec::with_capacity(self.data.len());
 
         for (i, image) in self.data.iter().enumerate() {
-            let path = format!("{}.{}.{}.png", prefix, self.created, i + 1);
+            // Ensure the extension doesn't start with a dot
+            let ext = extension.trim_start_matches('.');
+            let path = format!("{}.{}.{}.{}", prefix, self.created, i + 1, ext);
             image.save_to_file(&path)?;
             paths.push(path);
         }

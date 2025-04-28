@@ -1,23 +1,26 @@
 //! Prompt and image input handling
 
-use anyhow::{Context, Result};
-use std::io::Read;
+use anyhow::{anyhow, Context};
+use std::ffi::{OsStr, OsString};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use crate::api::DecodedImageData;
 use crate::multipart;
 
 /// Parsed prompt and image inputs from the command line. Ensures at most one
-/// input uses stdin.
-pub struct PromptAndImages {
-    pub prompt: Prompt,
-    pub images: Option<Vec<Image>>,
-    pub mask: Option<Image>,
+/// input uses stdin. Also stores the desired output target.
+pub struct InputArgs {
+    pub prompt: PromptArg,
+    pub images: Option<Vec<ImageArg>>,
+    pub mask: Option<ImageArg>,
+    pub output: OutputTarget,
 }
 
 /// Prompts can be a literal string, a file path, or stdin ('-').
 #[derive(Clone, Debug)]
-pub enum Prompt {
+pub enum PromptArg {
     Literal(String),
     File(PathBuf),
     Stdin,
@@ -25,9 +28,28 @@ pub enum Prompt {
 
 /// Image inputs can be a file path or stdin ('-').
 #[derive(Clone, Debug)]
-pub enum Image {
+pub enum ImageArg {
     File(PathBuf),
     Stdin,
+}
+
+/// Represents the parsed value of the `--output` argument *before* validation
+/// against other arguments like `-n`.
+#[derive(Clone, Debug)]
+pub enum OutputArg {
+    File(PathBuf),
+    Stdout,
+}
+
+/// Represents the validated output destination for the generated image(s).
+#[derive(Clone, Debug)]
+pub enum OutputTarget {
+    /// Save automatically based on prompt, timestamp, and index.
+    Automatic,
+    /// Save to a specific file path. Only valid for n=1.
+    File(PathBuf),
+    /// Write to standard output. Only valid for n=1.
+    Stdout,
 }
 
 /// The read image data, including the raw bytes and metadata.
@@ -38,19 +60,27 @@ pub struct ImageData {
     pub content_type: &'static str,
 }
 
-impl PromptAndImages {
+impl InputArgs {
+    /// Creates a new `InputArgs` instance, validating input combinations.
+    ///
+    /// # Errors
+    ///
+    /// * More than one input source uses stdin (`-`).
+    /// * `--output` is specified (not automatic) but `n` is not 1.
     pub fn new(
-        prompt: Prompt,
-        images: Option<Vec<Image>>,
-        mask: Option<Image>,
+        prompt: PromptArg,
+        images: Option<Vec<ImageArg>>,
+        mask: Option<ImageArg>,
+        output_arg: Option<OutputArg>,
+        n: u8,
     ) -> anyhow::Result<Self> {
-        let prompt_stdin_count = matches!(prompt, Prompt::Stdin) as usize;
-        let mask_stdin_count = matches!(mask, Some(Image::Stdin)) as usize;
-
-        let images_stdin_count = match images {
+        // Only use stdin once across all inputs
+        let prompt_stdin_count = matches!(prompt, PromptArg::Stdin) as usize;
+        let mask_stdin_count = matches!(mask, Some(ImageArg::Stdin)) as usize;
+        let images_stdin_count = match &images {
             Some(ref imgs) => imgs
                 .iter()
-                .map(|img| matches!(img, Image::Stdin) as usize)
+                .map(|img| matches!(img, ImageArg::Stdin) as usize)
                 .sum(),
             None => 0,
         };
@@ -58,32 +88,54 @@ impl PromptAndImages {
         let total_stdin_count =
             prompt_stdin_count + mask_stdin_count + images_stdin_count;
         if total_stdin_count > 1 {
-            return Err(anyhow::anyhow!(
-                "Only one input prompt or --image can be '-' (stdin) at a time"
+            return Err(anyhow!(
+                "Only one input source (prompt, image, mask) can be '-' (stdin) at a time"
             ));
         }
+
+        // Non-automatic output target must be used with `-n 1`
+        let output = match output_arg {
+            // Default to automatic naming
+            None => OutputTarget::Automatic,
+            Some(OutputArg::File(path)) => {
+                if n != 1 {
+                    return Err(anyhow!(
+                        "Cannot use --output <file> when generating more than one image (n={n})"
+                    ));
+                }
+                OutputTarget::File(path)
+            }
+            Some(OutputArg::Stdout) => {
+                if n != 1 {
+                    return Err(anyhow!(
+                        "Cannot use --output - (stdout) when generating more than one image (n={n})"
+                    ));
+                }
+                OutputTarget::Stdout
+            }
+        };
 
         Ok(Self {
             prompt,
             images,
             mask,
+            output,
         })
     }
 }
 
-impl Prompt {
+impl PromptArg {
     pub fn read_prompt(self) -> anyhow::Result<String> {
         match self {
-            Prompt::Literal(prompt) => Ok(prompt),
-            Prompt::File(path) => {
-                std::fs::read_to_string(&path).with_context(|| {
+            PromptArg::Literal(prompt) => Ok(prompt),
+            PromptArg::File(path) => std::fs::read_to_string(&path)
+                .with_context(|| {
                     format!(
                         "Failed to read prompt from file: {}",
                         path.display()
                     )
-                })
-            }
-            Prompt::Stdin => {
+                }),
+            PromptArg::Stdin => {
                 let mut input = String::new();
                 std::io::stdin()
                     .lock()
@@ -95,7 +147,7 @@ impl Prompt {
     }
 }
 
-impl FromStr for Prompt {
+impl FromStr for PromptArg {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match LiteralOrFileOrStdin::from_str(s)? {
@@ -106,10 +158,10 @@ impl FromStr for Prompt {
     }
 }
 
-impl Image {
+impl ImageArg {
     pub fn read_image(self) -> anyhow::Result<ImageData> {
         match self {
-            Image::File(path) => {
+            ImageArg::File(path) => {
                 let bytes = std::fs::read(&path).with_context(|| {
                     format!(
                         "Failed to read image from file: {}",
@@ -123,7 +175,7 @@ impl Image {
                     content_type,
                 })
             }
-            Image::Stdin => {
+            ImageArg::Stdin => {
                 let mut bytes = Vec::new();
                 std::io::stdin()
                     .lock()
@@ -147,7 +199,7 @@ impl Image {
     }
 }
 
-impl FromStr for Image {
+impl FromStr for ImageArg {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match LiteralOrFileOrStdin::from_str(s)? {
@@ -189,5 +241,42 @@ impl FromStr for LiteralOrFileOrStdin {
         } else {
             Err(anyhow::anyhow!("File not found: {}", path.display()))
         }
+    }
+}
+
+impl From<OsString> for OutputArg {
+    fn from(s: OsString) -> Self {
+        if s == OsStr::new("-") {
+            OutputArg::Stdout
+        } else {
+            OutputArg::File(PathBuf::from(s))
+        }
+    }
+}
+
+impl OutputTarget {
+    /// Writes the image data to the specified target.
+    pub fn write_image(
+        &self,
+        image_data: &DecodedImageData,
+    ) -> anyhow::Result<()> {
+        match self {
+            OutputTarget::Automatic => {
+                // This case should be handled by the caller using save_images
+                unreachable!(
+                    "Automatic output target should be handled separately"
+                );
+            }
+            OutputTarget::File(path) => {
+                image_data
+                    .save_to_file(path.to_str().unwrap_or("output.image"))?;
+            }
+            OutputTarget::Stdout => {
+                let mut handle = io::stdout().lock();
+                handle.write_all(&image_data.image_bytes)?;
+                handle.flush()?;
+            }
+        }
+        Ok(())
     }
 }
