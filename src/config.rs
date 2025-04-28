@@ -4,12 +4,12 @@
 //! from a platform-standard location (`~/.config/imgen/config.json` on Linux/macOS,
 //! `%APPDATA%\imgen\config.json` on Windows).
 
-use directories::ProjectDirs;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::{
+    env,
     error::Error,
     fmt, fs,
     io::{self, Write},
@@ -17,8 +17,6 @@ use std::{
 };
 
 const CONFIG_FILE_NAME: &str = "config.json";
-const QUALIFIER: &str = "com";
-const ORGANIZATION: &str = "phlip9";
 const APPLICATION: &str = "imgen";
 
 /// Represents the user configuration.
@@ -72,14 +70,32 @@ impl From<io::Error> for ConfigError {
     }
 }
 
+/// Gets the platform-specific path to the configuration directory.
+///
+/// Returns `None` if the config directory cannot be determined.
+fn config_dir() -> Option<PathBuf> {
+    let mut dir =
+        env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                env::var_os("HOME").map(|home| {
+                    let mut path = PathBuf::from(home);
+                    path.push(".config");
+                    path
+                })
+            })?;
+
+    dir.push(APPLICATION);
+    Some(dir)
+}
+
 /// Gets the platform-specific path to the configuration file.
 ///
-/// Returns `Err(ConfigError::NoConfig)` if the config directory cannot be
-/// determined.
-pub fn get_config_path() -> Result<PathBuf, ConfigError> {
-    ProjectDirs::from(QUALIFIER, ORGANIZATION, APPLICATION)
-        .map(|proj_dirs| proj_dirs.config_dir().join(CONFIG_FILE_NAME))
-        .ok_or(ConfigError::NoConfig)
+/// Returns `None` if the config path cannot be determined.
+fn config_path() -> Option<PathBuf> {
+    let mut path = config_dir()?;
+    path.push(CONFIG_FILE_NAME);
+    Some(path)
 }
 
 impl Config {
@@ -88,12 +104,9 @@ impl Config {
     /// If the config file does not exist or cannot be read/parsed,
     /// a default `Config` is returned and a warning is logged.
     pub fn load() -> Config {
-        let config_path = match get_config_path() {
-            Ok(path) => path,
-            Err(err) => {
-                warn!("Failed to get config path: {}", err);
-                return Config::default();
-            }
+        let config_path = match config_path() {
+            Some(path) => path,
+            None => return Config::default(),
         };
 
         match Config::load_from_path(&config_path) {
@@ -132,7 +145,8 @@ impl Config {
     ///
     /// Creates the configuration directory if it doesn't exist.
     pub fn save(&self) -> Result<(), ConfigError> {
-        self.save_to_path(&get_config_path()?)
+        let path = config_path().ok_or(ConfigError::NoConfig)?;
+        self.save_to_path(&path)
     }
 
     /// Saves the configuration to a specific path.
@@ -182,12 +196,8 @@ mod tests {
 
     #[test]
     fn test_get_config_path_returns_some() {
-        assert!(get_config_path().is_ok());
-        if let Ok(path) = get_config_path() {
-            assert!(
-                path.ends_with(Path::new(APPLICATION).join(CONFIG_FILE_NAME))
-            );
-        }
+        let path = config_path().expect("Config path should be Some");
+        assert!(path.ends_with(Path::new(APPLICATION).join(CONFIG_FILE_NAME)));
     }
 
     #[test]
@@ -216,7 +226,7 @@ mod tests {
         // Ensure the file was created
         assert!(config_path.exists());
 
-        // --- Verify permissions on Unix ---
+        // Verify permissions on Unix
         #[cfg(unix)]
         {
             let metadata = fs::metadata(&config_path).unwrap();
