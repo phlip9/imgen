@@ -1,0 +1,7 @@
+- Stay focused -- keep changes limited to the task at hand
+- User experience > maintainble > readable > compact > performant
+- Commits should be atomic, self-contained, and pass all tests
+- First refactor to make the change easy, then actually make the change
+- Parse don't validate
+- Use types to make illegal states unrepresentable
+- Avoid useless comments

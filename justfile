@@ -6,8 +6,8 @@ help:
 
 ci:
     cargo fmt
-    cargo clippy --all-targets
-    cargo test
+    cargo clippy -q --all-targets
+    cargo test -q
 
 watch-ci:
     cargo watch --why --shell "just ci"
