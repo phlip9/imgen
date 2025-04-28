@@ -23,20 +23,27 @@ const DEFAULT_OUTPUT_FORMAT: &str = "png";
 const DEFAULT_QUALITY: &str = "auto";
 const DEFAULT_SIZE: &str = "1024x1024";
 
-/// A CLI tool for generating and editing images using OpenAI's `gpt-image-1`
-/// image generation model.
+/// imgen
 ///
-/// If --image inputs are provided, the tool will use the image editing API.
-/// Otherwise, it will use the image creation API.
+/// imgen generates images using OpenAI's `gpt-image-1` image generation model.
+///
+/// The tool operates in two modes: 'create' mode by default, or 'edit' mode
+/// when one or more `--image` inputs are provided.
+///
+/// The OpenAI API key is sourced in this order:
+/// • from the command line with `--openai-api-key`
+/// • from the environment variable `OPENAI_API_KEY` (.env file supported)
+/// • from the config file `~/.config/imgen/config.json`
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about, long_about)]
+#[clap(verbatim_doc_comment)]
 pub struct Cli {
     /// OpenAI API key (can also be set via `OPENAI_API_KEY` environment variable)
     #[arg(short = 'k', long, env = "OPENAI_API_KEY", hide_env = true)]
     pub openai_api_key: Option<String>,
 
     /// Store the `--openai-api-key` in the config file and exit.
-    #[arg(long, default_value_t = false)]
+    #[arg(long)]
     pub setup: bool,
 
     // Embed the unified image generation arguments directly
@@ -52,71 +59,90 @@ pub struct Cli {
 #[derive(Parser, Debug)]
 pub struct GenerateArgs {
     // --- Main Arguments ---
-    /// A text description of the desired image(s).
+    /// A text description of the desired image(s) (Required unless --setup)
     ///
     /// Can be a literal string, a path to a text file (if the path exists),
     /// or '-' to read from stdin. Use '@<path>' to force interpretation as a
     /// file path.
-    #[arg(required_unless_present("setup"))] // Required if not doing setup
+    #[arg(verbatim_doc_comment, required_unless_present("setup"))]
     pub prompt: Option<input::PromptArg>,
 
-    /// Where to save the output image (only supported with `-n 1`).
-    ///
-    /// If not specified, automatically saves to files based on the prompt, e.g.,
-    /// "a_cute_cat.<timestamp>.<i>.png".
-    ///
-    /// Use '-' to write the image data to standard output (only works with -n 1).
-    /// Use a file path to save to a specific file (only works with -n 1).
-    #[arg(short, long)]
-    pub output: Option<input::OutputArg>,
-
     // --- Edit-specific Arguments ---
-    /// The image(s) to edit. Providing at least one input image triggers the
+    /// Input image(s) to edit. Providing at least one input image triggers the
     /// edit operation.
     ///
     /// Can be file paths or '-' to read from stdin. Use '@<path>' to force
     /// interpretation as a file path.
-    #[arg(short, long)]
+    ///
+    /// Supported input image formats:
+    /// • png, jpeg, webp
+    #[arg(short, long, group = "edit", verbatim_doc_comment)]
+    #[arg(help_heading = "Input Options (edit)")]
     pub image: Option<Vec<input::ImageArg>>,
 
     /// An image whose transparent areas indicate where to edit (edit only).
     ///
     /// Can be a file path or '-' to read from stdin. Use '@<path>' to force
     /// interpretation as a file path.
-    #[arg(short, long)]
+    ///
+    /// Supported input mask image formats:
+    /// • png, jpeg, webp
+    #[arg(short, long, group = "edit", verbatim_doc_comment)]
+    #[arg(help_heading = "Input Options (edit)")]
     pub mask: Option<input::ImageArg>,
 
-    // --- Create-Specific Arguments ---
-    /// Set the generated image background opacity (transparent, opaque, auto) (create only)
-    #[arg(long, default_value = DEFAULT_BACKGROUND)]
-    pub background: String,
+    /// Save the generated output image to this path (only supported with `-n 1`).
+    ///
+    /// If not specified, automatically saves to files based on the prompt, e.g.,
+    /// "a_cute_cat.<timestamp>.<i>.png".
+    ///
+    /// Can be a file path or '-' to write to stdout. Use '@<path>' to force
+    /// interpretation as a file path.
+    ///
+    /// Supported output image formats:
+    /// • png, jpeg, webp (no --image inputs)
+    /// • png (with --image inputs)
+    #[arg(short, long, verbatim_doc_comment)]
+    #[arg(help_heading = "Output Options")]
+    pub output: Option<input::OutputArg>,
 
-    /// Control the content-moderation level (low, auto) (create only)
-    #[arg(long, default_value = DEFAULT_MODERATION)]
-    pub moderation: String,
-
-    /// The output image compression level (jpeg and webp only) (0-100) (create only)
-    #[arg(long, default_value_t = DEFAULT_OUTPUT_COMPRESSION)]
-    pub output_compression: u8,
-
-    /// The output image format (png, jpeg, webp) (create only)
-    #[arg(long, default_value = DEFAULT_OUTPUT_FORMAT)]
-    pub output_format: String,
-
-    // --- Common Arguments ---
     /// The number of images to generate (1-10)
-    #[arg(short, default_value_t = DEFAULT_NUM_IMAGES)]
+    #[arg(short, long, default_value_t = DEFAULT_NUM_IMAGES)]
+    #[arg(help_heading = "Output Options", verbatim_doc_comment)]
     pub n: u8,
 
     /// The size of the generated images.
     ///
     /// One of: auto, 1024x1024, 1536x1024, 1024x1536, square, landscape, portrait
     #[arg(long, default_value = DEFAULT_SIZE)]
+    #[arg(help_heading = "Output Options")]
     pub size: String,
 
     /// The quality of the image that will be generated (high, medium, low, auto)
     #[arg(long, default_value = DEFAULT_QUALITY)]
+    #[arg(help_heading = "Output Options")]
     pub quality: String,
+
+    // --- Create-Specific Arguments ---
+    /// Set the generated image background opacity (transparent, opaque, auto) (create only)
+    #[arg(long, group = "create", default_value = DEFAULT_BACKGROUND)]
+    #[arg(help_heading = "Output Options (create)")]
+    pub background: String,
+
+    /// Control the content-moderation level (low, auto) (create only)
+    #[arg(long, group = "create", default_value = DEFAULT_MODERATION)]
+    #[arg(help_heading = "Output Options (create)")]
+    pub moderation: String,
+
+    /// The output image compression level (jpeg and webp only) (0-100) (create only)
+    #[arg(long, group = "create", default_value_t = DEFAULT_OUTPUT_COMPRESSION)]
+    #[arg(help_heading = "Output Options (create)")]
+    pub output_compression: u8,
+
+    /// The output image format (png, jpeg, webp) (create only)
+    #[arg(long, group = "create", default_value = DEFAULT_OUTPUT_FORMAT)]
+    #[arg(help_heading = "Output Options (create)")]
+    pub output_format: String,
 }
 
 impl Cli {
