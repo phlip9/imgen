@@ -19,6 +19,7 @@ env_logger = { version = "*", default-features = false, features = ["auto-color"
 indicatif = "*"
 indicatif-log-bridge = "*"
 log = "*"
+open = { version = "*", features = ["shellexecute-on-windows"] }
 rand = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"

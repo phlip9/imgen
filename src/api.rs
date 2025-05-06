@@ -1,4 +1,7 @@
-use std::{io::Write, path::Path};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use crate::{cli::input, multipart};
 use anyhow::Context;
@@ -273,10 +276,13 @@ impl DecodedImageData {
 
 impl DecodedResponse {
     /// Save image(s) to the specified output target.
+    ///
+    /// Returns a list of paths to the saved files. Returns an empty list if
+    /// writing to stdout.
     pub fn save_images(
         &self,
         out_target: input::OutputTargetWithData<'_>,
-    ) -> anyhow::Result<Vec<String>> {
+    ) -> anyhow::Result<Vec<PathBuf>> {
         use input::OutputTargetWithData::*;
 
         match out_target {
@@ -286,14 +292,15 @@ impl DecodedResponse {
                 for (i, image) in self.data.iter().enumerate() {
                     // Ensure the extension doesn't start with a dot
                     let ext = extension.trim_start_matches('.');
-                    let path = format!(
+                    let filename = format!(
                         "{}.{}.{}.{}",
                         prefix,
                         self.created,
                         i + 1,
                         ext
                     );
-                    image.save_to_file(Path::new(&path))?;
+                    let path = PathBuf::from(filename);
+                    image.save_to_file(&path)?;
                     paths.push(path);
                 }
                 Ok(paths)
@@ -316,11 +323,11 @@ impl DecodedResponse {
                 let path = out_target.file_path();
                 image_data.save_to_file_or_stdout(path)?;
 
-                let path_str = match path {
-                    Some(path) => path.display().to_string(),
-                    None => "stdout".to_owned(),
+                let paths = match path {
+                    Some(path) => vec![PathBuf::from(path)],
+                    None => vec![],
                 };
-                Ok(vec![path_str])
+                Ok(paths)
             }
         }
     }

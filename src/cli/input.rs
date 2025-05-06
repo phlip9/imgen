@@ -78,6 +78,7 @@ impl InputArgs {
         mask: Option<ImageArg>,
         output_arg: Option<OutputArg>,
         n: u8,
+        open: bool,
     ) -> anyhow::Result<Self> {
         // Only use stdin once across all inputs
         let prompt_stdin_count = matches!(prompt, PromptArg::Stdin) as usize;
@@ -116,6 +117,13 @@ impl InputArgs {
                 OutputTarget::Stdout
             }
         };
+
+        // Cannot use `--open` with `--output -` (stdout)
+        if open && matches!(out_target, OutputTarget::Stdout) {
+            return Err(anyhow!(
+                "Cannot use --open flag when writing output to stdout (`--output -`)"
+            ));
+        }
 
         Ok(Self {
             prompt,

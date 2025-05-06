@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::{
     api::{CreateRequest, DecodedResponse, EditRequest, Response},
     cli::spinner::Spinner,
@@ -126,6 +128,13 @@ pub struct GenerateArgs {
     #[arg(help_heading = "Output Options")]
     pub output: Option<input::OutputArg>,
 
+    /// Open the generated image(s) in the default system viewer after saving.
+    ///
+    /// Conflicts with `--output -` (stdout).
+    #[arg(long)]
+    #[arg(help_heading = "Output Options")]
+    pub open: bool,
+
     /// The number of images to generate (1-10)
     #[arg(short, long, default_value_t = DEFAULT_NUM_IMAGES)]
     #[arg(help_heading = "Output Options", verbatim_doc_comment)]
@@ -212,6 +221,7 @@ impl GenerateArgs {
             self.mask,
             self.output,
             self.n,
+            self.open,
         )?;
         let prompt = inputs.prompt.read_prompt()?;
         let uses_edit_api = !inputs.images.is_empty();
@@ -285,18 +295,19 @@ impl GenerateArgs {
             client.create_images(req)
         };
 
-        // Handle the response (logging, decoding, saving/writing)
+        // Handle the response (logging, decoding, saving/writing, opening)
         let response = result?;
-        handle_response(response, out_target)
+        handle_response(response, out_target, self.open)
     }
 }
 
 /// Handles the common logic after receiving an API response.
 ///
-/// Decodes images, calculates cost, and saves/writes the output based on the target.
+/// Decodes images, calculates cost, saves/writes the output, and optionally opens them.
 fn handle_response(
     resp: Response,
     out_target: input::OutputTargetWithData<'_>,
+    open_files: bool,
 ) -> anyhow::Result<()> {
     // Calculate and display cost information
     let cost = resp.usage.calculate_cost();
@@ -313,8 +324,23 @@ fn handle_response(
         .context("Failed to decode base64 image data")?;
 
     // Handle output based on the target
-    decoded_resp.save_images(out_target)?;
+    let out_paths = decoded_resp.save_images(out_target)?;
 
+    // Open the generated images if requested
+    if open_files {
+        open_images(&out_paths)?;
+    }
+
+    Ok(())
+}
+
+/// Open the generated images in the default system viewer.
+fn open_images(paths: &[PathBuf]) -> anyhow::Result<()> {
+    for path in paths {
+        open::that_detached(path).with_context(|| {
+            format!("Failed to open image: {}", path.display())
+        })?;
+    }
     Ok(())
 }
 
